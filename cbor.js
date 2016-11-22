@@ -1264,7 +1264,7 @@
 
 	/**
 	 * helper function to test if a char code is within the decimal numeric range
-	 * @param charCode
+	 * @param {number} charCode
 	 * @returns {boolean}
 	 */
 	function isNumericChar(charCode) {
@@ -1274,7 +1274,7 @@
 	/**
 	 * helper function to test of a string just is a sequence of integers
 	 * exclude sequences that start with 0 that are not just 0
-	 * @param string
+	 * @param {string} string
 	 * @returns {boolean}
 	 */
 
