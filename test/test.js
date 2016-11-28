@@ -8,7 +8,8 @@
 describe('CBOR', () => {
 	const CBOR = require('../');
 
-	const assert = require('assert');
+	const chai = require('chai');
+	const assert = chai && chai.assert || require('assert');
 
 	assert.equalBytesAsHex = function equalBytesAsHex(actual, expected, message) {
 		assert.strictEqual(typeof actual, typeof expected, 'types must be the same,' + message );
@@ -92,6 +93,7 @@ describe('CBOR', () => {
 						-256
 					);
 				});
+
 				it('should decode 65535 from three bytes', () => {
 					assert.deepEqual(
 						CBOR.decode(new Uint8Array([0x19,0xFF,0xFF])),
@@ -318,6 +320,7 @@ describe('CBOR', () => {
 					new Map([[1,2],[3,4]])
 				);
 			});
+
 		});
 
 		context('symbols', () => {
@@ -867,6 +870,18 @@ describe('CBOR', () => {
 			it('should encode new Map([[1,2],[3,4]]) as a tagged map in 7 bytes', () => {
 				const encoded = new Uint8Array(CBOR.encode(new Map([[1,2],[3,4]])));
 				const correct = new Uint8Array([0xD8,0x7F,0xA2,0x01,0x02,0x03,0x04]);
+				assert.equalBytesAsHex(encoded, correct, "should be equal");
+			});
+
+			it('should encode new Date(0) as a tagged integer in 2 bytes', () => {
+				const encoded = new Uint8Array(CBOR.encode(new Date(0)));
+				const correct = new Uint8Array([0xC1,0x00]);
+				assert.equalBytesAsHex(encoded, correct, "should be equal");
+			});
+
+			it('should encode /test/g as a tagged tagged string in bytes', () => {
+				const encoded = new Uint8Array(CBOR.encode(/test/g));
+				const correct = new Uint8Array([0xD8,0x23,0x67,0x2F,0x74,0x65,0x73,0x74,0x2F,0x67]);
 				assert.equalBytesAsHex(encoded, correct, "should be equal");
 			});
 		});

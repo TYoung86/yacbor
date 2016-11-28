@@ -1042,6 +1042,18 @@
 				}
 			}
 		}
+		encodeStringRaw(value, byteView, state, options);
+	}
+
+
+	/**
+	 *
+	 * @param {string} value
+	 * @param {Uint8Array} byteView
+	 * @param {object} state
+	 * @param {object} options
+	 */
+	function encodeStringRaw(value, byteView, state, options) {
 		encodePrefix(96, getByteLengthOfUtf8String(value), byteView, state, options);
 		encodeUtf8StringAsBytes(value, byteView, state, options);
 	}
@@ -1264,7 +1276,7 @@
 
 	/**
 	 * helper function to test if a char code is within the decimal numeric range
-	 * @param charCode
+	 * @param {number} charCode
 	 * @returns {boolean}
 	 */
 	function isNumericChar(charCode) {
@@ -1274,7 +1286,7 @@
 	/**
 	 * helper function to test of a string just is a sequence of integers
 	 * exclude sequences that start with 0 that are not just 0
-	 * @param string
+	 * @param {string} string
 	 * @returns {boolean}
 	 */
 
@@ -1367,7 +1379,7 @@
 						const key = Symbol.keyFor(value);
 						if (key !== undefined) {
 							encodeTag(141, byteView, state, options);
-							encodeString(`Symbol.for(${key})`, byteView, state, options);
+							encodeStringRaw(`Symbol.for(${key})`, byteView, state, options);
 							break;
 						} else {
 							switch (value) {
@@ -1417,7 +1429,8 @@
 								}
 								default: {
 									encodeTag(142, byteView, state, options);
-									encodeString(value.toString(), byteView, state, options);
+									// string is formatted "Symbol(name)"
+									encodeStringRaw(value.toString(), byteView, state, options);
 									break;
 								}
 							}
@@ -1431,13 +1444,15 @@
 								encodeNumber(value.valueOf() / 1000, byteView, state, options);
 							} else {
 								encodeTag(0, byteView, state, options);
-								encodeString(value.toISOString(), byteView, state, options);
+								encodeStringRaw(value.toISOString(), byteView, state, options);
 							}
 							break;
 						}
 						if (value instanceof RegExp) {
 							encodeTag(35, byteView, state, options);
+							// this can be B64 encoded. what.
 							encodeString(`/${value.source}/${value.flags}`, byteView, state, options);
+							break;
 						}
 						if (value instanceof Number) {
 							if (options.doNotTagBoxedValues !== true)
@@ -1526,9 +1541,8 @@
 			buffer = byteView.buffer;
 		}
 
-		if (options.selfDescribing === true) {
-			encodeTag(55799, byteView, state, options)
-		}
+		if (options.selfDescribing === true)
+			encodeTag(55799, byteView, state, options);
 
 		encodeElement(value, byteView, state, options);
 
