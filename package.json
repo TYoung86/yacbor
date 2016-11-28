@@ -1,6 +1,6 @@
 {
   "name": "yacbor",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Yet Another Concise Binary Object Representation, an extended RFC7049 implementation in ECMAScript 6.",
   "keywords": [
     "cbor"
