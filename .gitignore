@@ -104,3 +104,12 @@ jspm_packages
 .yarn-integrity
 
 /.idea/dictionaries
+
+# Visual Studio / Resharper stuff
+*.suo
+/typings
+/bin
+/obj
+code.asm
+hydrogen.cfg
+/_ReSharper.Caches

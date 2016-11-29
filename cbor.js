@@ -1,12 +1,19 @@
-(function (root) {
-	'use strict';
+(function cbor() {
+	"use strict";
+	const root = typeof global === 'undefined' ? this : global;
+	const Buffer = root.Buffer;
+	const TextDecoder = root.TextDecoder;
 
-	const cbor = Object.create(null);
+	/**
+	 * @export
+	 */
+	function CBOR() { throw new Error("CBOR is a namespace."); }
 
 	const optionDescriptions = Object.freeze(Object.setPrototypeOf({
 		dryRun: "No transcoding will be performed, only the length of the encoded size will be returned.",
 		selfDescribing: "The encoded result will begin with the CBOR self-description tag. (Larger output)",
 		noExplicitConversion: "Explicit conversion will not be performed. (Larger output)",
+		minExplicitConvSize: "A minimum size before attempting automatic explicit conversions. (Larger values mean larger output)",
 		explicitConvertLowerCaseHex: "Use custom explicit conversion tags for lowercase base 16 encoding. (Smaller output, Non-standard)",
 		backReferences: "Back references will be used for repeating or recursive arrays and objects. (Smaller output, Non-standard)",
 		smallBackReferences: "Back references will be used for repeating small values. (Elements that consume 4 to 8 bytes, Non-standard)",
@@ -17,7 +24,7 @@
 		doNotThrow: "No exceptions will be thrown, an incomplete CBOR element will be returned on exception.",
 		destinationBuffer: "The buffer to write the encoded element to. If not provided, one will be created.",
 		indefiniteStringNonStrings: "Allow indefinite strings to be composed of non-string types. (Non-standard)",
-		decomposedStrings: "Construct strings using non-string types and conversion tags. (Needs indefiniteStringNonStrings)",
+		decomposedStrings: "Construct strings using non-string types and conversion tags. (Needs indefiniteStringNonStrings)", // not yet implemented
 		throwOnUnsupportedTag: "Specifies if an error should be thrown upon encountering an unknown tag.",
 		throwOnUnsupportedSimpleValue: "Specifies if an error should be thrown upon encountering an unknown simple value.",
 		encodeDatesAsStrings: "Encode all dates as strings with appropriate tagging instead of numbers. (Larger output)",
@@ -25,69 +32,69 @@
 		unknownTagParser: "A function that decodes an unknown tag given the context.",
 	}, null));
 
-	const POW_2_24 = Math.pow(2, 24);
+	const POW_2_24 = 1<<24;
 	const POW_2_32 = Math.pow(2, 32);
 
-	/** @type {object} */
+	/** @type {Object} */
 	const emptyObject = Object.freeze(Object.create(null));
 	//noinspection JSValidateTypes
-	/** @type {Array} */
-	const emptyArray = Object.freeze([]);
+
+	///** @type {Array} */
+	//const emptyArray = Object.freeze([]);
+
 	//noinspection JSValidateTypes
 	/** @type {Uint8Array} */
 	const emptyByteArray = Object.freeze(new Uint8Array(0));
 
-	class NonCodingIndicator {
-		//noinspection JSUnusedGlobalSymbols
-		static get instance() {
-			return nonCodingIndicator;
-		}
-	}
-	class SelfDescribingIndicator extends NonCodingIndicator {
-		//noinspection JSUnusedGlobalSymbols
-		static get instance() {
-			return selfDescribingIndicator;
-		}
-	}
-	class ErrorIndicator extends NonCodingIndicator {
-		//noinspection JSUnusedGlobalSymbols
-		static get instance() {
-			return errorIndicator;
-		}
-	}
-	class BreakIndicator extends NonCodingIndicator {
-		//noinspection JSUnusedGlobalSymbols
-		static get instance() {
-			return breakIndicator;
-		}
-	}
-	class TagIndicator extends NonCodingIndicator {
-		//noinspection JSUnusedGlobalSymbols
-		static get instance() {
-			return tagIndicator;
-		}
-	}
-	const nonCodingIndicator = Object.freeze(new NonCodingIndicator());
-	const selfDescribingIndicator = Object.freeze(new SelfDescribingIndicator());
-	const errorIndicator = Object.freeze(new ErrorIndicator());
-	const breakIndicator = Object.freeze(new BreakIndicator());
-	const tagIndicator = Object.freeze(new TagIndicator());
+	function NonCodingIndicator() {}
+	NonCodingIndicator.prototype = Object.create(null);
+	NonCodingIndicator.instance = new NonCodingIndicator();
+	Object.freeze(NonCodingIndicator);
+	Object.freeze(NonCodingIndicator.prototype);
+	Object.freeze(NonCodingIndicator.instance);
+
+	function SelfDescribingIndicator() {}
+	SelfDescribingIndicator.prototype = NonCodingIndicator.instance;
+	SelfDescribingIndicator.instance = new SelfDescribingIndicator();
+	Object.freeze(SelfDescribingIndicator);
+	Object.freeze(SelfDescribingIndicator.prototype);
+	Object.freeze(SelfDescribingIndicator.instance);
+
+	function ErrorIndicator() {}
+	ErrorIndicator.prototype = NonCodingIndicator.instance;
+	ErrorIndicator.instance = new ErrorIndicator();
+	Object.freeze(ErrorIndicator);
+	Object.freeze(ErrorIndicator.prototype);
+	Object.freeze(ErrorIndicator.instance);
+
+	function BreakIndicator() {}
+	BreakIndicator.prototype = NonCodingIndicator.instance;
+	BreakIndicator.instance = new BreakIndicator();
+	Object.freeze(BreakIndicator);
+	Object.freeze(BreakIndicator.prototype);
+	Object.freeze(BreakIndicator.instance);
+
+	function TagIndicator() {}
+	TagIndicator.prototype = NonCodingIndicator.instance;
+	TagIndicator.instance = new TagIndicator();
+	Object.freeze(TagIndicator);
+	Object.freeze(TagIndicator.prototype);
+	Object.freeze(TagIndicator.instance);
+
+	const nonCodingIndicator = NonCodingIndicator.instance;
+	const selfDescribingIndicator = SelfDescribingIndicator.instance;
+	const errorIndicator = ErrorIndicator.instance;
+	const breakIndicator = BreakIndicator.instance;
+	const tagIndicator = TagIndicator.instance;
 
 	class UnknownSimpleValue {
-		constructor(value) {
-			this.value = value;
-		}
-
-		valueOf() {
-			return this.value;
-		}
+		constructor(value) { this.value = value; }
+		valueOf() { return this.value; }
 	}
 
 	const regExpForRegExps = /^\/((?:.*?(?!\\).)?)\/(.*)$/;
 	const regExpForUniqueSymbols = /^Symbol\((.*)\)$/;
 	const regExpForSharedSymbols = /^Symbol\.for\((.*)\)$/;
-
-	const Buffer = typeof root.Buffer !== 'undefined' ? root.Buffer : undefined;
 
 	const smallBuffer = new ArrayBuffer(8);
 	//noinspection JSCheckFunctionSignatures // broken signature check
@@ -97,84 +104,57 @@
 	const smallBuffer8Bytes = new Uint8Array(smallBuffer, 0, 8);
 	const smallBuffer4Bytes = new Uint8Array(smallBuffer, 0, 4);
 
-	/**
-	 *
-	 * @function
-	 * @param {string} string
-	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
-	 * @returns {number}
-	 */
-	let encodeUtf8StringAsBytes;
-	/**
-	 *
-	 * @function
-	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {number} byteLength
-	 * @param {object} options
-	 * @returns {string}
-	 */
-	let decodeBytesAsUtf8String;
+
 
 	/**
-	 *
-	 * @function
-	 * @param {string} string
-	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
-	 * @returns {number}
+	 * object helper function
+	 * @param object
+	 * @returns {boolean}
+	 * @constructor
 	 */
-	let encodeBase64StringAsBytes;
-	/**
-	 *
-	 * @function
-	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {number} byteLength
-	 * @param {object} options
-	 * @returns {string}
-	 */
-	let decodeBytesAsBase64String;
-	/**
-	 *
-	 * @function
-	 * @param {string} string
-	 * @returns {number}
-	 */
-	let detectBase64String;
+	function Object_isEmpty(object) {
+		//noinspection LoopStatementThatDoesntLoopJS
+		for(const b in a) {
+			return false;
+		}
+		return true;
+	}
+
+	const HALF_EPSILON = (Number.EPSILON/2);
+	const ONE_MINUS_HALF_EPSILON = 1 - HALF_EPSILON;
 
 	/**
-	 * upper or lower, doesn't care
-	 * @function
-	 * @param {string} string
-	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * math sign helper function that doesn't de-optimize
+	 * NOTE: does not return 0 if value is 0
+	 * @param {number} value
 	 * @returns {number}
 	 */
-	let encodeHexStringAsBytes;
+	function Math_sign_fast(value) {
+		return ( value >> 31 ) | 1;
+	}
 
 	/**
-	 *
-	 * @function
-	 * @param {number} byteLength
-	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
-	 * @returns {string}
-	 */
-	let decodeBytesAsHexString;
-
-	/**
-	 *
-	 * @function
-	 * @param {string} string
+	 * math ceiling helper function that doesn't de-optimize
+	 * NOTE: assumes value is absolute, fails on large values
+	 * @param {number} value
 	 * @returns {number}
 	 */
-	let detectHexString;
+	function Math_ceilOfAbs(value) {
+		return Math_floorOfAbs((Math_sign_fast(value) * ONE_MINUS_HALF_EPSILON) + value);
+	}
+
+	/**
+	 * math floor helper function that doesn't de-optimize
+	 * NOTE: assumes value is absolute, fails on large values
+	 * @param {number} value
+	 * @returns {number}
+	 */
+	function Math_floorOfAbs(value) {
+		return value >>> 0;
+	}
+
+
+
 
 	/**
 	 * helper method that gets the byte length given the base 64 character count
@@ -182,7 +162,7 @@
 	 * @returns {number}
 	 */
 	function getBase64DecodedLength(encodedChars) {
-		return encodedChars - Math.ceil(encodedChars / 4);
+		return encodedChars - Math_ceilOfAbs(encodedChars / 4);
 	}
 
 	/**
@@ -191,7 +171,7 @@
 	 * @returns {number}
 	 */
 	function getBase64EncodedCharCount(byteLength) {
-		return byteLength + Math.ceil(byteLength / 3);
+		return byteLength + Math_ceilOfAbs(byteLength / 3);
 	}
 
 	/**
@@ -211,20 +191,21 @@
 	function getByteLengthOfUtf8String(string) {
 		const charLength = string.length;
 		let byteLength = 0;
-		for (let i = 0; i < charLength; /*i*/) {
-			const charCode = string.charCodeAt(i);
-			if (charCode < 0x80) {
-				byteLength += 1;
-				i += 1;
-			} else if (charCode < 0x800) {
-				byteLength += 2;
-				i += 1;
-			} else if (charCode < 0xd800) {
-				byteLength += 3;
-				i += 1;
+		let codePoint = 0;
+		for (let i = 0; i < charLength; ++i ) {
+			codePoint = string.codePointAt(i);
+			if (codePoint < 0x80) {
+				byteLength = byteLength + (1);
+				i = i + 1;
+			} else if (codePoint < 0x800) {
+				byteLength = byteLength + (2);
+				i = i + 1;
+			} else if (codePoint < 0xd800) {
+				byteLength = byteLength + (3);
+				i = i + 1;
 			} else {
-				byteLength += 4;
-				i += 2;
+				byteLength = byteLength + (4);
+				i = i + 2;
 			}
 		}
 		return byteLength;
@@ -237,9 +218,9 @@
 	 */
 	function getBase64CharCount(string) {
 		let strLength = string.length;
-		return string.charCodeAt(strLength - 2) === 61
+		return string.codePointAt(strLength - 2) === 61
 			? strLength - 2
-			: string.charCodeAt(strLength - 1) === 61
+			: string.codePointAt(strLength - 1) === 61
 			       ? strLength - 1
 			       : strLength;
 	}
@@ -262,357 +243,274 @@
 		return string.length >>> 1;
 	}
 
-	/**
-	 * helper method for setting members of an Object
-	 * @param {object} o
-	 * @param {string} k
-	 * @param {*} v
-	 */
-	function objectSetMember(o, k, v) {
-		o[k] = v;
-	}
+	const rxUpperCaseHexString = /^[0-9A-F]+$/;
+	const rxLowerCaseHexString = /^[0-9a-f]+$/;
 
 	/**
-	 * helper method for setting members of a Map
-	 * @param {Map} o
-	 * @param k
-	 * @param v
+	 *
+	 * @param {string} string
+	 * @returns {number}
 	 */
-	function mapSetMember(o, k, v) {
-		o.set(k, v);
-	}
-
-	//noinspection JSUnusedLocalSymbols // k is not used
-	/**
-	 * helper method for adding members to a Set with an unused key
-	 * @param {Set} o
-	 * @param {number} k
-	 * @param {*} v
-	 */
-	function setAddMember2(o, k, v) {
-		o.add(v);
-	}
-
-	/**
-	 * helper method for pushing members to an Array
-	 * @param {Array} o
-	 * @param {*} v
-	 */
-	function arrayPushMember(o, v) {
-		o.push(v);
-	}
-
-	/**
-	 * helper method for adding members to a Set
-	 * @param {Set} o
-	 * @param {*} v
-	 */
-	function setAddMember(o, v) {
-		o.add(v);
-	}
-
-	/**
-	 * initialize the hexadecimal (base 16) encoder and decoder
-	 */
-	function initHexCodec() {
-
-		const rxUpperCaseHexString = /^[0-9A-F]+$/;
-		const rxLowerCaseHexString = /^[0-9a-f]+$/;
-
-		/**
-		 *
-		 * @param {string} string
-		 * @returns {number}
-		 */
-		function detectHexStringJS(string) {
-			if (string.length === 0)
-				return 0;
-			if ((string.length & 1 ) !== 0)
-				return 0;
-			if (rxUpperCaseHexString.test(string) === true)
-				return 1;
-			if (rxLowerCaseHexString.test(string) === true)
-				return -1;
+	function detectHexString(string) {
+		if (string.length === 0 || (string.length & 1) !== 0)
 			return 0;
-		}
+		if (rxUpperCaseHexString.exec(string) !== null)
+			return 1;
+		if (rxLowerCaseHexString.exec(string) !== true)
+			return -1;
+		return 0;
+	}
 
-		/**
-		 * upper or lower, doesn't care
-		 * @param {string} string
-		 * @param {Uint8Array} byteView
-		 * @param {object} state
-		 * @param {object} options
-		 * @returns {number}
-		 */
-		function encodeHexStringAsBytesJS(string, byteView, state, options) {
-			let strLength = string.length;
-			if ((strLength & 1) !== 0)
-				throw new Error("Hexadecimal strings must be of an even number of characters.");
-			if (options.dryRun === true) {
-				state.offset += strLength >>> 1;
-				return strLength >>> 1;
-			}
-			for (let i = 0; i < strLength; i += 2) {
-				let ch1 = string.charCodeAt(i);
-				let ch2 = string.charCodeAt(i + 1);
-				byteView[state.offset++] =
-					(((ch1 & 0xF) + ( ch1 > 0x39 ? 0x9 : 0 )) << 4) |
-					(ch2 & 0xF) + ( ch2 > 0x39 ? 0x9 : 0 );
-			}
+	/**
+	 * upper or lower, doesn't care.
+	 * @param {string} string
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {Object} options
+	 * @returns {number}
+	 */
+	function encodeHexStringAsBytes(string, byteView, state, options) {
+		let strLength = string.length;
+		if ((strLength & 1) !== 0)
+			throw new Error("Hexadecimal strings must be of an even number of characters.");
+		if (options.dryRun === true) {
+			state.offset = state.offset + (strLength >>> 1);
 			return strLength >>> 1;
 		}
-
-		const upperCaseLetterDiff = ('A'.charCodeAt(0) - '9'.charCodeAt(0)) - 1;
-		const lowerCaseLetterDiff = ('a'.charCodeAt(0) - '9'.charCodeAt(0)) - 1;
-
-		/**
-		 *
-		 * @param {number} byteLength
-		 * @param {Uint8Array} byteView
-		 * @param {object} state
-		 * @param {object} options
-		 * @returns {string}
-		 */
-		function decodeBytesAsHexStringJS(byteLength, byteView, state, options) {
-			if (options.dryRun === true) {
-				state.offset += byteLength;
-				return "";
-			}
-			const letterDiff = state.hexLowerCase === true ? lowerCaseLetterDiff : upperCaseLetterDiff;
-			const letters = new Uint8Array(byteLength * 2);
-			for (let i = 0; i < byteLength; ++i) {
-				let byte = byteView[state.offset + i];
-				let cv1 = (byte >>> 4) + 0x30;
-				let cv2 = (byte & 0xF) + 0x30;
-				if (cv1 > 0x39) cv1 += letterDiff;
-				if (cv2 > 0x39) cv2 += letterDiff;
-				const li = i * 2;
-				letters[li] = cv1;
-				letters[li + 1] = cv2;
-			}
-			return String.fromCharCode.apply(null, letters);
+		for (let i = 0; i < strLength; i += 2) {
+			let ch1 = string.codePointAt(i);
+			let ch2 = string.codePointAt(i + 1);
+			byteView[state.offset++] =
+				(((ch1 & 0xF) + ( ch1 > 0x39 ? 0x9 : 0 )) << 4) |
+				(ch2 & 0xF) + ( ch2 > 0x39 ? 0x9 : 0 );
 		}
+		return strLength >>> 1;
+	}
 
-		encodeHexStringAsBytes = encodeHexStringAsBytesJS;
-		decodeBytesAsHexString = decodeBytesAsHexStringJS;
-		detectHexString = detectHexStringJS;
+	const upperCaseLetterDiff = ('A'.codePointAt(0) - '9'.codePointAt(0)) - 1;
+	const lowerCaseLetterDiff = ('a'.codePointAt(0) - '9'.codePointAt(0)) - 1;
+
+	/**
+	 *
+	 * @param {number} byteLength
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {Object} options
+	 * @returns {string}
+	 */
+	function decodeBytesAsHexString(byteLength, byteView, state, options) {
+		if (options.dryRun === true) {
+			state.offset = state.offset + (byteLength);
+			return "";
+		}
+		const letterDiff = state.hexLowerCase === true ? lowerCaseLetterDiff : upperCaseLetterDiff;
+		const letters = new Uint8Array(byteLength * 2);
+		for (let i = 0; i < byteLength; ++i) {
+			let byte = byteView[state.offset + i];
+			let cv1 = (byte >>> 4) + 0x30;
+			let cv2 = (byte & 0xF) + 0x30;
+			if (cv1 > 0x39) cv1 = cv1 + (letterDiff);
+			if (cv2 > 0x39) cv2 = cv2 + (letterDiff);
+			const li = i * 2;
+			letters[li] = cv1;
+			letters[li + 1] = cv2;
+		}
+		return String.fromCharCode.apply(null, letters);
+	}
+
+
+
+	const rxBase64 = /^(?:[A-Za-z0-9+\/]{4})*(?:|[A-Za-z0-9+\/][AQgw]==|[A-Za-z0-9+\/]{2}[AEIMQUYcgkosw048]=)$/;
+	const rxBase64Url = /^(?:[A-Za-z0-9\-_]{4})*(?:|[A-Za-z0-9\-_][AQgw]|[A-Za-z0-9+\/]{2}[AEIMQUYcgkosw048])$/;
+
+	/**
+	 *
+	 * @param {string} string
+	 * @returns {number}
+	 */
+	function detectBase64String(string) {
+		if (string.length === 0)
+			return 0;
+		if (rxBase64.exec(string) !== null)
+			return 1;
+		if (rxBase64Url.exec(string) !== null)
+			return 2;
+		return 0;
+	}
+
+	const base64ValueToCharLookup = new Uint8Array(64);
+	const base64UrlValueToCharLookup = new Uint8Array(64);
+	const base64CharToValueLookup = new Uint8Array(123 - 43);
+
+	function initBase64Lookups() {
+		//noinspection SpellCheckingInspection
+		const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+		let codePoint = 0;
+		for (let i = 0; i < 64; ++i) {
+			codePoint = charset.codePointAt(i);
+			base64CharToValueLookup[codePoint - 43] = i;
+			base64ValueToCharLookup[i] = codePoint;
+		}
+		base64UrlValueToCharLookup.set(base64ValueToCharLookup, 0);
+		const dashCharCode = '-'.codePointAt(0);
+		const underscoreCharCode = '_'.codePointAt(0);
+		base64UrlValueToCharLookup[62] = dashCharCode;
+		base64UrlValueToCharLookup[63] = underscoreCharCode;
+		base64CharToValueLookup[dashCharCode] = 62;
+		base64CharToValueLookup[underscoreCharCode] = 63;
+	}
+
+	function getBase64CharValue(charCode) {
+		return base64CharToValueLookup[charCode - 43] | 0;
 	}
 
 	/**
-	 * initialize the base 64 encoder and decoder
+	 *
+	 * @param {string} string
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {Object} options
+	 * @returns {number}
 	 */
-	function initBase64Codec() {
-		const rxBase64 = /^(?:[A-Za-z0-9+\/]{4})*(?:|[A-Za-z0-9+\/][AQgw]==|[A-Za-z0-9+\/]{2}[AEIMQUYcgkosw048]=)$/;
-		const rxBase64Url = /^(?:[A-Za-z0-9\-_]{4})*(?:|[A-Za-z0-9\-_][AQgw]|[A-Za-z0-9+\/]{2}[AEIMQUYcgkosw048])$/;
-
-		/**
-		 *
-		 * @param {string} string
-		 * @returns {number}
-		 */
-		function detectBase64StringJS(string) {
-			if (string.length === 0)
-				return 0;
-			if (rxBase64.test(string) === true)
-				return 1;
-			if (rxBase64Url.test(string) === true)
-				return 2;
-			return 0;
-		}
-
-		const base64ValueToCharLookup = new Uint8Array(64);
-		const base64UrlValueToCharLookup = new Uint8Array(64);
-		const base64CharToValueLookup = new Uint8Array(123 - 43);
-
-		function initLookups() {
-			//noinspection SpellCheckingInspection
-			const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-			for (let i = 0; i < 64; ++i) {
-				const charCode = charset.charCodeAt(i);
-				base64CharToValueLookup[charCode - 43] = i;
-				base64ValueToCharLookup[i] = charCode;
-			}
-			base64UrlValueToCharLookup.set(base64ValueToCharLookup, 0);
-			const dashCharCode = '-'.charCodeAt(0);
-			const underscoreCharCode = '_'.charCodeAt(0);
-			base64UrlValueToCharLookup[62] = dashCharCode;
-			base64UrlValueToCharLookup[63] = underscoreCharCode;
-			base64CharToValueLookup[dashCharCode] = 62;
-			base64CharToValueLookup[underscoreCharCode] = 63;
-		}
-
-		function getBase64CharValue(charCode) {
-			return base64CharToValueLookup[charCode - 43] | 0;
-		}
-
-		/**
-		 *
-		 * @param {string} string
-		 * @param {Uint8Array} byteView
-		 * @param {object} state
-		 * @param {object} options
-		 * @returns {number}
-		 */
-		function encodeBase64StringAsBytesJS(string, byteView, state, options) {
-			const charLength = getBase64CharCount(string);
-			const byteLength = getBase64DecodedLength(charLength);
-			if (options.dryRun === true) {
-				state.offset += byteLength;
-				return byteLength;
-			}
-			const end = state.offset + byteLength;
-			for (let i = 0; i < charLength; i += 4) {
-				const cv1 = getBase64CharValue(string.charCodeAt(i));
-				const cv2 = getBase64CharValue(string.charCodeAt(i + 1));
-				const cv3 = getBase64CharValue(string.charCodeAt(i + 2));
-				const cv4 = getBase64CharValue(string.charCodeAt(i + 3));
-
-				const threeBytes = (cv1 << 18) + (cv2 << 12) + (cv3 << 6) + cv4;
-
-				if (state.offset < end)
-					byteView[state.offset++] = threeBytes >>> 16;
-				else break;
-				if (state.offset < end)
-					byteView[state.offset++] = threeBytes >>> 8;
-				else break;
-				if (state.offset < end)
-					byteView[state.offset++] = threeBytes;
-				else break;
-			}
+	function encodeBase64StringAsBytes(string, byteView, state, options) {
+		const charLength = getBase64CharCount(string);
+		const byteLength = getBase64DecodedLength(charLength);
+		if (options.dryRun === true) {
+			state.offset = state.offset + (byteLength);
 			return byteLength;
 		}
+		const end = state.offset + byteLength;
+		let cv1 = 0;
+		let cv2 = 0;
+		let cv3 = 0;
+		let cv4 = 0;
+		let threeBytes = 0;
+		for (let i = 0; i < charLength; i = i + 4) {
+			cv1 = getBase64CharValue(string.codePointAt(i));
+			cv2 = getBase64CharValue(string.codePointAt(i + 1));
+			cv3 = getBase64CharValue(string.codePointAt(i + 2));
+			cv4 = getBase64CharValue(string.codePointAt(i + 3));
+			threeBytes = (cv1 << 18) + (cv2 << 12) + (cv3 << 6) + cv4;
 
-		/**
-		 *
-		 * @param {Uint8Array} byteView
-		 * @param {object} state
-		 * @param {number} byteLength
-		 * @param {object} options
-		 * @returns {string}
-		 */
-		function decodeBytesAsBase64StringJS(byteView, state, byteLength, options) {
-			if (byteLength === 0) return "";
-			const end = state.offset + byteLength;
-			const charCount = getBase64EncodedCharCount(byteLength);
-			const charBufferSize = state.base64Url === true
-				? charCount
-				: getBase64EncodedLengthFromCharCount(charCount);
-			if (options.dryRun === true) {
-				state.offset += charBufferSize;
-				return "";
-			}
-			const charBuffer = new Uint8Array(charBufferSize);
-			let carryBuffer = 0;
-			let charBufIdx = 0;
-			let byteCounter = 0;
-			const charLookup = state.base64Url === true ? base64UrlValueToCharLookup : base64ValueToCharLookup;
-			while (state.offset <= end) {
-				switch (byteCounter++ % 3) {
-					default:
-					case 0: {
-						carryBuffer = byteView[state.offset++];
-						charBuffer[charBufIdx++] = charLookup[carryBuffer >>> 2];
-						break;
-					}
-					case 1: {
-						carryBuffer <<= 8;
-						carryBuffer |= byteView[state.offset++];
-						charBuffer[charBufIdx++] = charLookup[(carryBuffer >>> 4) & 0x3f];
-						break;
-					}
-					case 2: {
-						carryBuffer <<= 8;
-						carryBuffer |= byteView[state.offset++];
-						charBuffer[charBufIdx++] = charLookup[(carryBuffer >>> 6) & 0x3f];
-						charBuffer[charBufIdx++] = charLookup[carryBuffer & 0x3f];
-						break;
-					}
+			if (state.offset < end)
+				byteView[state.offset++] = threeBytes >>> 16;
+			else break;
+			if (state.offset < end)
+				byteView[state.offset++] = threeBytes >>> 8;
+			else break;
+			if (state.offset < end)
+				byteView[state.offset++] = threeBytes;
+			else break;
+		}
+		return byteLength;
+	}
+
+	/**
+	 *
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {number} byteLength
+	 * @param {Object} options
+	 * @returns {string}
+	 */
+	function decodeBytesAsBase64String(byteView, state, byteLength, options) {
+		if (byteLength === 0) return "";
+		const end = state.offset + byteLength;
+		const charCount = getBase64EncodedCharCount(byteLength);
+		const charBufferSize = state.base64Url === true
+			? charCount
+			: getBase64EncodedLengthFromCharCount(charCount);
+		if (options.dryRun === true) {
+			state.offset = state.offset + (charBufferSize);
+			return "";
+		}
+		const charBuffer = new Uint8Array(charBufferSize);
+		let carryBuffer = 0;
+		let charBufIdx = 0;
+		let byteCounter = 0;
+		const charLookup = state.base64Url === true ? base64UrlValueToCharLookup : base64ValueToCharLookup;
+		while (state.offset <= end) {
+			switch (byteCounter++ % 3) {
+				default:
+				case 0: {
+					carryBuffer = byteView[state.offset++];
+					charBuffer[charBufIdx++] = charLookup[carryBuffer >>> 2];
+					break;
+				}
+				case 1: {
+					carryBuffer <<= 8;
+					carryBuffer = carryBuffer | (byteView[state.offset++]);
+					charBuffer[charBufIdx++] = charLookup[(carryBuffer >>> 4) & 0x3f];
+					break;
+				}
+				case 2: {
+					carryBuffer <<= 8;
+					carryBuffer = carryBuffer | (byteView[state.offset++]);
+					charBuffer[charBufIdx++] = charLookup[(carryBuffer >>> 6) & 0x3f];
+					charBuffer[charBufIdx++] = charLookup[carryBuffer & 0x3f];
+					break;
 				}
 			}
-			if (state.base64Url !== true) {
-				const charAlignment4 = charCount & 3;
-				if (charAlignment4 === 2) {
-					charBuffer[charBufferSize - 2] = 61;
-					charBuffer[charBufferSize - 1] = 61;
-				} else if (charAlignment4 === 3)
-					charBuffer[charBufferSize - 1] = 61;
-			}
-
-			return String.fromCharCode.apply(null, charBuffer);
+		}
+		if (state.base64Url !== true) {
+			const charAlignment4 = charCount & 3;
+			if (charAlignment4 === 2) {
+				charBuffer[charBufferSize - 2] = 61;
+				charBuffer[charBufferSize - 1] = 61;
+			} else if (charAlignment4 === 3)
+				charBuffer[charBufferSize - 1] = 61;
 		}
 
-		initLookups();
-
-		encodeBase64StringAsBytes = encodeBase64StringAsBytesJS;
-		decodeBytesAsBase64String = decodeBytesAsBase64StringJS;
-		detectBase64String = detectBase64StringJS;
+		return String.fromCharCode.apply(null, charBuffer);
 	}
+
+
+	/**
+	 *
+	 * @function
+	 * @param {string} string
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {Object} options
+	 * @returns {number}
+	 */
+	let encodeUtf8StringAsBytes;
+	/**
+	 *
+	 * @function
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {number} byteLength
+	 * @param {Object} options
+	 * @returns {string}
+	 */
+	let decodeBytesAsUtf8String;
 
 	/**
 	 * initialize the utf-8 encoder and decoder
 	 */
 	function initUtf8Codec() {
 
-		/**
-		 *
-		 * @param {string} string
-		 * @param {Uint8Array} byteView
-		 * @param {object} state
-		 * @param {object} options
-		 * @returns {number}
-		 */
-		function encodeUtf8StringAsBytesJSCC(string, byteView, state, options) {
-			if (options.dryRun === true) {
-				const size = getByteLengthOfUtf8String(string);
-				state.offset += size;
-				return size;
-			}
-			const start = state.offset;
-			const charLength = string.length;
-			for (let i = 0; i < charLength; ++i) {
-				const codePoint = string.charCodeAt(i);
-				if (codePoint < 0x80) {
-					byteView[state.offset++] = codePoint;
-				} else if (codePoint < 0x800) {
-					byteView[state.offset++] = (0xc0 | codePoint >>> 6);
-					byteView[state.offset++] = (0x80 | codePoint & 0x3f);
-				} else if (codePoint < 0xd800) {
-					byteView[state.offset++] = (0xe0 | codePoint >>> 12);
-					byteView[state.offset++] = (0x80 | (codePoint >>> 6) & 0x3f);
-					byteView[state.offset++] = (0x80 | codePoint & 0x3f);
-				} else {
-					const fullCodePoint =
-						((codePoint & 0x3ff) << 10 |
-						(string.charCodeAt(++i) & 0x3ff))
-						+ 0x10000;
-
-					byteView[state.offset++] = (0xf0 | fullCodePoint >>> 18);
-					byteView[state.offset++] = (0x80 | (fullCodePoint >>> 12) & 0x3f);
-					byteView[state.offset++] = (0x80 | (fullCodePoint >>> 6) & 0x3f);
-					byteView[state.offset++] = (0x80 | fullCodePoint & 0x3f);
-				}
-			}
-			return state.offset - start;
-		}
 
 		/**
 		 *
 		 * @param {string} string
 		 * @param {Uint8Array} byteView
-		 * @param {object} state
-		 * @param {object} options
+		 * @param {Object} state
+		 * @param {Object} options
 		 * @returns {number}
 		 */
-		function encodeUtf8StringAsBytesJSCP(string, byteView, state, options) {
+		function encodeUtf8StringAsBytesJS(string, byteView, state, options) {
 			if (options.dryRun === true) {
 				const size = getByteLengthOfUtf8String(string);
-				state.offset += size;
+				state.offset = state.offset + (size);
 				return size;
 			}
 			const start = state.offset;
 			const charLength = string.length;
+			let codePoint = 0;
 			for (let i = 0; i < charLength; ++i) {
-				const codePoint = string.codePointAt(i);
+				codePoint = string.codePointAt(i);
 				if (codePoint < 0x80) {
 					byteView[state.offset++] = codePoint;
 				} else if (codePoint < 0x800) {
@@ -635,158 +533,134 @@
 
 		/**
 		 *
-		 * @function
-		 * @param {string} string
 		 * @param {Uint8Array} byteView
-		 * @param {object} state
-		 * @param {object} options
-		 * @returns {number}
-		 */
-		const encodeUtf8StringAsBytesJS = 'codePointAt' in String.prototype
-			? encodeUtf8StringAsBytesJSCP : encodeUtf8StringAsBytesJSCC;
-
-		/**
-		 *
-		 * @param {Uint8Array} byteView
-		 * @param {object} state
+		 * @param {Object} state
 		 * @param {number} byteLength
-		 * @param {object} options
+		 * @param {Object} options
 		 * @returns {string}
 		 */
 		function decodeBytesAsUtf8StringJS(byteView, state, byteLength, options) {
 			if (options.dryRun === true) {
-				state.offset += byteLength;
+				state.offset = state.offset + byteLength;
 				return "";
 			}
-			const startOffset = state.offset;
-			const end = startOffset + byteLength;
-			let offset = startOffset;
+
+			const end = state.offset + byteLength;
+
+			let offset = state.offset;
+
+			let string = "";
 
 			let charLength = 0;
+			let codePoint = 0;
 			while (offset < end) {
-				const codePoint = byteView[offset];
+				codePoint = byteView[offset];
 				if (codePoint < 0x80) {
-					charLength += 1;
-					offset += 1;
+					string += String.fromCodePoint( codePoint );
+					charLength = charLength + (1);
+					offset = offset + (1);
 				} else if (codePoint < 0xe0) {
-					charLength += 1;
-					offset += 2;
+					string += String.fromCodePoint( codePoint );
+					charLength = charLength + (1);
+					offset = offset + (2);
 				} else if (codePoint < 0xf0) {
 					const fullCodePoint = (codePoint & 0x0f) << 12
 						| (byteView[offset + 1] & 0x3f) << 6
 						| (byteView[offset + 2] & 0x3f);
-					charLength += fullCodePoint < 0x10000 ? 1 : 2;
-					offset += 3;
-				} else {
-					charLength += 2;
-					offset += 4;
-				}
-			}
-
-			offset = startOffset;
-
-			let chars = new Uint16Array(charLength);
-			let charIndex = 0;
-
-			while (offset < end) {
-				const codePoint = byteView[offset];
-				if (codePoint < 0x80) {
-					chars[charIndex++] = codePoint;
-					offset += 1;
-				} else if (codePoint < 0xe0) {
-					chars[charIndex++] = (codePoint & 0x1f) << 6
-						| (byteView[offset + 1] & 0x3f);
-					offset += 2;
-				} else if (codePoint < 0xf0) {
-					const fullCodePoint = (codePoint & 0x0f) << 12
-						| (byteView[offset + 1] & 0x3f) << 6
-						| (byteView[offset + 2] & 0x3f);
-					if (fullCodePoint >= 0x10000) {
-						chars[charIndex++] = 0xd800 | (fullCodePoint >>> 10);
-						chars[charIndex++] = 0xdc00 | (fullCodePoint & 0x3ff);
-					} else {
-						chars[charIndex++] = fullCodePoint;
-					}
-					offset += 3;
+					string += String.fromCodePoint( fullCodePoint );
+					charLength = charLength + (fullCodePoint < 0x10000 ? 1 : 2);
+					offset = offset + (3);
 				} else {
 					const fullCodePoint = ((codePoint & 0x07) << 18
 						| (byteView[offset + 1] & 0x3f) << 12
 						| (byteView[offset + 2] & 0x3f) << 6
 						| (byteView[offset + 3] & 0x3f))
 						- 0x10000;
-					chars[charIndex++] = 0xd800 | (fullCodePoint >>> 10);
-					chars[charIndex++] = 0xdc00 | (fullCodePoint & 0x3ff);
-					offset += 4;
+					string += String.fromCodePoint( fullCodePoint );
+					charLength = charLength + (2);
+					offset = offset + (4);
 				}
 			}
 
 			state.offset = offset;
 
-			return String.fromCharCode.apply(null, chars);
+			return string;
 		}
 
-		if ('Buffer' in root && typeof Buffer !== 'undefined') {
-			encodeUtf8StringAsBytes =
-				/**
-				 *
-				 * @param {string} string
-				 * @param {Uint8Array} byteView
-				 * @param {object} state
-				 * @param {object} options
-				 * @returns {number}
-				 */
-					function encodeUtf8StringAsBytesNode(string, byteView, state, options) {
-					if (options.dryRun === true) {
-						state.offset += getByteLengthOfUtf8String(string);
-						return;
-					}
-					return Buffer.from(byteView.buffer).write(string, state.offset);
-				};
-			decodeBytesAsUtf8String =
-				/**
-				 *
-				 * @param {Uint8Array} byteView
-				 * @param {object} state
-				 * @param {number} byteLength
-				 * @param {object} options
-				 * @returns {string}
-				 */
-					function decodeBytesAsUtf8StringNode(byteView, state, byteLength, options) {
-					if (options.dryRun === true) {
-						state.offset += byteLength;
-						return "";
-					}
-					const result = Buffer.from(byteView.buffer, state.offset, byteLength).toString('utf8');
-					state.offset += byteLength;
-					return result;
-				};
-		} else if ('TextDecoder' in root) {
-			/**
-			 * @name TextDecoder
-			 * @function
-			 * @global
-			 * @param {string} codec
-			 */
-			const textDecoder = new TextDecoder('utf-8');
+
+		/**
+		 * @name TextDecoder
+		 * @function
+		 * @global
+		 * @param {string} codec
+		 */
+		let textDecoder = undefined;
+
+		/**
+		 *
+		 * @param {string} string
+		 * @param {Uint8Array} byteView
+		 * @param {Object} state
+		 * @param {Object} options
+		 * @returns {number}
+		 */
+		function encodeUtf8StringAsBytesNode(string, byteView, state, options) {
+			const byteLength = getByteLengthOfUtf8String(string);
+			if (options.dryRun === true) {
+				state.offset = state.offset + byteLength;
+				return byteLength;
+			}
+			const offset = byteView.byteOffset + state.offset;
+			state.offset = state.offset + byteLength;
+			const buf = Buffer.from(byteView.buffer, offset, byteLength);
+			return buf.write(string, 0, byteLength, 'utf8');
+		}
+
+		/**
+		 *
+		 * @param {Uint8Array} byteView
+		 * @param {Object} state
+		 * @param {number} byteLength
+		 * @param {Object} options
+		 * @returns {string}
+		 */
+		function decodeBytesAsUtf8StringNode(byteView, state, byteLength, options) {
+			if (options.dryRun === true) {
+				state.offset = state.offset + byteLength;
+				return "";
+			}
+			const offset = byteView.byteOffset + state.offset;
+			const result = Buffer.from(byteView.buffer, offset, byteLength).toString('utf8');
+			state.offset = state.offset + byteLength;
+			return result;
+		}
+
+		/**
+		 *
+		 * @param {Uint8Array} byteView
+		 * @param {Object} state
+		 * @param {number} byteLength
+		 * @param {Object} options
+		 * @returns {string}
+		 */
+		function decodeBytesAsUtf8StringNative(byteView, state, byteLength, options) {
+			if (options.dryRun === true) {
+				state.offset = state.offset + byteLength;
+				return "";
+			}
+			const offset = byteView.byteOffset + state.offset;
+			const result = textDecoder.decode(new DataView(byteView.buffer, offset, byteLength));
+			state.offset = state.offset + byteLength;
+			return result;
+		}
+
+		if (Buffer !== undefined) {
+			encodeUtf8StringAsBytes = encodeUtf8StringAsBytesNode;
+			decodeBytesAsUtf8String = decodeBytesAsUtf8StringNode;
+		} else if (TextDecoder !== undefined) {
+			textDecoder = new TextDecoder('utf-8');
 			encodeUtf8StringAsBytes = encodeUtf8StringAsBytesJS;
-			decodeBytesAsUtf8String =
-				/**
-				 *
-				 * @param {Uint8Array} byteView
-				 * @param {object} state
-				 * @param {number} byteLength
-				 * @param {object} options
-				 * @returns {string}
-				 */
-					function decodeBytesAsUtf8StringNative(byteView, state, byteLength, options) {
-					if (options.dryRun === true) {
-						state.offset += byteLength;
-						return "";
-					}
-					const result = textDecoder.decode(new DataView(byteView.buffer, state.offset, byteLength));
-					state.offset += byteLength;
-					return result;
-				};
+			decodeBytesAsUtf8String = decodeBytesAsUtf8StringNative;
 		} else {
 			encodeUtf8StringAsBytes = encodeUtf8StringAsBytesJS;
 			decodeBytesAsUtf8String = decodeBytesAsUtf8StringJS;
@@ -797,12 +671,12 @@
 	 *
 	 * @param {number} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeDouble(value, byteView, state, options) {
 		if (options.dryRun === true) {
-			state.offset += 9;
+			state.offset = state.offset + (9);
 			return;
 		}
 		byteView[state.offset] = 0xfb; // fp64
@@ -816,24 +690,24 @@
 		byteView[state.offset + 6] = smallBuffer8Bytes[2];
 		byteView[state.offset + 7] = smallBuffer8Bytes[1];
 		byteView[state.offset + 8] = smallBuffer8Bytes[0];
-		state.offset += 9;
+		state.offset = state.offset + (9);
 	}
 
 	function encodeInteger(positive, encodedValue, byteView, state, options) {
 		if (encodedValue < 24) {
 			if (options.dryRun === true) {
-				state.offset += 1;
+				state.offset = state.offset + (1);
 			} else {
 				if (positive) {
 					byteView[state.offset] = encodedValue;
 				} else {
 					byteView[state.offset] = 0x20 | encodedValue;
 				}
-				state.offset += 1;
+				state.offset = state.offset + (1);
 			}
 		} else if (encodedValue <= 0xff) {
 			if (options.dryRun === true) {
-				state.offset += 2;
+				state.offset = state.offset + (2);
 			} else {
 				if (positive) {
 					byteView[state.offset] = 0x18;
@@ -841,11 +715,11 @@
 					byteView[state.offset] = 0x38;
 				}
 				byteView[state.offset + 1] = encodedValue;
-				state.offset += 2;
+				state.offset = state.offset + (2);
 			}
 		} else if (encodedValue <= 0xffff) {
 			if (options.dryRun === true) {
-				state.offset += 3;
+				state.offset = state.offset + (3);
 			} else {
 				if (positive) {
 					byteView[state.offset] = 0x19;
@@ -854,11 +728,11 @@
 				}
 				byteView[state.offset + 1] = encodedValue >>> 8;
 				byteView[state.offset + 2] = encodedValue & 0xff;
-				state.offset += 3;
+				state.offset = state.offset + (3);
 			}
 		} else {
 			if (options.dryRun === true) {
-				state.offset += 5;
+				state.offset = state.offset + (5);
 			} else {
 				if (positive) {
 					byteView[state.offset] = 0x1a;
@@ -869,7 +743,7 @@
 				byteView[state.offset + 2] = encodedValue >>> 16;
 				byteView[state.offset + 3] = encodedValue >>> 8;
 				byteView[state.offset + 4] = encodedValue;
-				state.offset += 5;
+				state.offset = state.offset + (5);
 			}
 			// 64-bit ints are pointless to encode in JS currently
 		}
@@ -879,8 +753,8 @@
 	 *
 	 * @param {number} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeNumber(value, byteView, state, options) {
 		if (options.allNumbersAreDoubles === true) {
@@ -889,7 +763,7 @@
 		}
 		if (!isFinite(value)) {
 			if (options.dryRun === true) {
-				state.offset += 3;
+				state.offset = state.offset + (3);
 				return;
 			}
 			byteView[state.offset] = 0xf9; // fp16
@@ -901,7 +775,7 @@
 				byteView[state.offset + 1] = 0xfc; // -Inf
 			}
 			byteView[state.offset + 2] = 0;
-			state.offset += 3;
+			state.offset = state.offset + (3);
 			return;
 		}
 		const zero = value === 0;
@@ -909,22 +783,19 @@
 		const negZero = zero && positive !== true;
 		if (negZero) {
 			if (options.dryRun === true) {
-				state.offset += 3;
+				state.offset = state.offset + (3);
 				return;
 			}
 			byteView[state.offset] = 0xf9; // fp16
 			byteView[state.offset + 1] = 0x80;
 			byteView[state.offset + 2] = 0x00;
-			state.offset += 3;
+			state.offset = state.offset + (3);
 			return;
 		}
-		const integerValue = Math.floor(value);
+		const integerValue = Math.floor(value); // TODO: maybe find alternative check
 		const encodedValue = ( positive ? integerValue : ~integerValue ) >>> 0;
 		if (value === integerValue && encodedValue < POW_2_32) {
 			encodeInteger(positive, encodedValue, byteView, state, options);
-
-			return;
-
 		} else {
 			// floating point or bigger than 32-bit integer
 			smallBufferFloat32[0] = value;
@@ -934,7 +805,7 @@
 				// easily translated
 				if (unsigned > 0x38800000 && unsigned < 0x47000000 && (unsigned & 0x00001fff) === 0) {
 					if (options.dryRun === true) {
-						state.offset += 3;
+						state.offset = state.offset + (3);
 						return;
 					}
 					byteView[state.offset] = 0xf9; // fp16
@@ -945,7 +816,7 @@
 					const float16Bits = signBits | expoBits | mantissaBits;
 					byteView[state.offset + 1] = float16Bits >>> 8;
 					byteView[state.offset + 2] = float16Bits & 0xff;
-					state.offset += 3;
+					state.offset = state.offset + (3);
 					return;
 				}
 				// depends on dropping bits from the mantissa
@@ -966,7 +837,7 @@
 					const mantissaAllowedMask = (0xff800000 >> mantissaBitsAllowed) >>> 0;
 					if ((unsigned & ~mantissaAllowedMask) === 0) {
 						if (options.dryRun === true) {
-							state.offset += 3;
+							state.offset = state.offset + (3);
 							return;
 						}
 						byteView[state.offset] = 0xf9; // fp16
@@ -976,12 +847,12 @@
 						const float16Bits = signBits | highBit | mantissaBits;
 						byteView[state.offset + 1] = float16Bits >>> 8;
 						byteView[state.offset + 2] = float16Bits & 0xff;
-						state.offset += 3;
+						state.offset = state.offset + (3);
 						return;
 					}
 				}
 				if (options.dryRun === true) {
-					state.offset += 5;
+					state.offset = state.offset + (5);
 					return;
 				}
 				byteView[state.offset] = 0xfa; // fp32
@@ -990,55 +861,54 @@
 				byteView[state.offset + 2] = smallBuffer4Bytes[2];
 				byteView[state.offset + 3] = smallBuffer4Bytes[1];
 				byteView[state.offset + 4] = smallBuffer4Bytes[0];
-				state.offset += 5;
+				state.offset = state.offset + (5);
 				return;
 			}
 			encodeDouble(value, byteView, state, options);
-			return;
 		}
-		//noinspection UnreachableCodeJS
-		throw new Error("Unhandled encoding of number.");
 	}
 
 	/**
 	 *
 	 * @param {string} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeString(value, byteView, state, options) {
-		if (options.noExplicitConversion !== true) {
-			const base16StringCheck = detectHexString(value);
-			if (base16StringCheck !== 0) {
-				// uppercase
-				if (base16StringCheck === 1) {
-					encodeTag(23, byteView, state, options);
-					encodePrefix(64, getHexStringByteLength(value), byteView, state, options);
-					encodeHexStringAsBytes(value, byteView, state, options);
-					return;
+		if (options.noExplicitConversion !== true && value.length >= options.minExplicitConvSize) {
+			if (value.length >= 2) {
+				const base16StringCheck = detectHexString(value);
+				if (base16StringCheck !== 0) {
+					// uppercase
+					if (base16StringCheck === 1) {
+						encodeTag(23, byteView, state, options);
+						encodePrefix(64, getHexStringByteLength(value), byteView, state, options);
+						encodeHexStringAsBytes(value, byteView, state, options);
+						return;
+					}
+					// lowercase
+					else if (base16StringCheck === -1 && options.explicitConvertLowerCaseHex === true) {
+						encodeTag(126, byteView, state, options);
+						encodePrefix(64, getHexStringByteLength(value), byteView, state, options);
+						encodeHexStringAsBytes(value, byteView, state, options);
+						return;
+					}
 				}
-				// lowercase
-				else if (base16StringCheck === -1 && options.explicitConvertLowerCaseHex === true) {
-					encodeTag(126, byteView, state, options);
-					encodePrefix(64, getHexStringByteLength(value), byteView, state, options);
-					encodeHexStringAsBytes(value, byteView, state, options);
-					return;
-				}
-			}
-			if (value.length > 4) {
-				const base64StringCheck = detectBase64String(value);
-				if (base64StringCheck !== 0) {
-					// base64
-					if (base64StringCheck === 1)
-						encodeTag(21, byteView, state, options);
-					// base64url
-					else
-						encodeTag(22, byteView, state, options);
+				if (value.length >= 4) {
+					const base64StringCheck = detectBase64String(value);
+					if (base64StringCheck !== 0) {
+						// base64
+						if (base64StringCheck === 1)
+							encodeTag(21, byteView, state, options);
+						// base64url
+						else
+							encodeTag(22, byteView, state, options);
 
-					encodePrefix(64, getBase64StringByteLength(value), byteView, state, options);
-					encodeBase64StringAsBytes(value, byteView, state, options);
-					return;
+						encodePrefix(64, getBase64StringByteLength(value), byteView, state, options);
+						encodeBase64StringAsBytes(value, byteView, state, options);
+						return;
+					}
 				}
 			}
 		}
@@ -1050,8 +920,8 @@
 	 *
 	 * @param {string} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeStringRaw(value, byteView, state, options) {
 		encodePrefix(96, getByteLengthOfUtf8String(value), byteView, state, options);
@@ -1115,7 +985,10 @@
 				}
 			}
 		}
+
+		//noinspection JSCheckFunctionSignatures
 		encodePrefix(64, value.byteLength, byteView, state, options);
+		//noinspection JSCheckFunctionSignatures
 		encodeBuffer(value.buffer, byteView, state, options, value.byteOffset, value.byteLength);
 	}
 
@@ -1124,8 +997,8 @@
 	 * @param {number} baseValue
 	 * @param {number} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodePrefix(baseValue, value, byteView, state, options) {
 		if (value < 0) {
@@ -1136,20 +1009,20 @@
 		}
 		if (value < 24) {
 			if (options.dryRun === true) {
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				return;
 			}
 			byteView[state.offset++] = baseValue + value;
 		} else if (value < 256) {
 			if (options.dryRun === true) {
-				state.offset += 2;
+				state.offset = state.offset + (2);
 				return;
 			}
 			byteView[state.offset++] = baseValue + 24;
 			byteView[state.offset++] = value;
 		} else if (value < 65536) {
 			if (options.dryRun === true) {
-				state.offset += 3;
+				state.offset = state.offset + (3);
 				return;
 			}
 			byteView[state.offset++] = baseValue + 25;
@@ -1157,7 +1030,7 @@
 			byteView[state.offset++] = value;
 		} else if (value < POW_2_32) {
 			if (options.dryRun === true) {
-				state.offset += 5;
+				state.offset = state.offset + (5);
 				return;
 			}
 			byteView[state.offset++] = baseValue + 27;
@@ -1167,7 +1040,7 @@
 			byteView[state.offset++] = value;
 		} else {
 			if (options.dryRun === true) {
-				state.offset += 9;
+				state.offset = state.offset + (9);
 				return;
 			}
 			byteView[state.offset++] = baseValue + 28;
@@ -1188,8 +1061,8 @@
 	 *
 	 * @param {number} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeTag(value, byteView, state, options) {
 		encodePrefix(192, value, byteView, state, options);
@@ -1199,8 +1072,8 @@
 	 *
 	 * @param {number} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeSimpleValue(value, byteView, state, options) {
 		encodePrefix(224, value, byteView, state, options);
@@ -1210,14 +1083,14 @@
 	 *
 	 * @param {ArrayBuffer} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 * @param {number} valueOffset
 	 * @param {number} valueLength
 	 */
 	function encodeBuffer(value, byteView, state, options, valueOffset, valueLength) {
 		if (options.dryRun) {
-			state.offset += valueLength;
+			state.offset = state.offset + (valueLength);
 			return;
 		}
 		const source = new Uint8Array(value, valueOffset, valueLength);
@@ -1227,10 +1100,27 @@
 
 	/**
 	 *
+	 * @param {Array} value
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {Object} options
+	 */
+	function encodeArray(value, byteView, state, options) {
+		const memberCount = value.length;
+		encodePrefix(128, memberCount, byteView, state, options);
+		let member = undefined;
+		for (let i = 0; i < memberCount; ++i) {
+			member = value[i];
+			encodeElement(member, byteView, state, options);
+		}
+	}
+
+	/**
+	 *
 	 * @param {Set} set
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeSet(set, byteView, state, options) {
 		const memberCount = set.size;
@@ -1243,26 +1133,22 @@
 
 	/**
 	 *
-	 * @param {Array} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
-	function encodeArray(value, byteView, state, options) {
-		const memberCount = value.length;
-		encodePrefix(128, memberCount, byteView, state, options);
-		for (let i = 0; i < memberCount; ++i) {
-			const member = value[i];
-			encodeElement(member, byteView, state, options);
-		}
+	function encodeWeakSet(byteView, state, options) {
+		encodeTag(144, byteView, state, options);
+		encodePrefix(160, 0, byteView, state, options);
+
 	}
 
 	/**
 	 *
 	 * @param {Map} map
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeMap(map, byteView, state, options) {
 		const memberCount = map.size;
@@ -1272,6 +1158,18 @@
 			encodeElement(key, byteView, state, options);
 			encodeElement(value, byteView, state, options);
 		}
+	}
+
+	/**
+	 *
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {Object} options
+	 */
+	function encodeWeakMap(byteView, state, options) {
+		encodeTag(143, byteView, state, options);
+		encodePrefix(160, 0, byteView, state, options);
+
 	}
 
 	/**
@@ -1291,14 +1189,14 @@
 	 */
 
 	function isPositiveIntegerString(string) {
-		const firstCharCode = string.charCodeAt(0);
+		const firstCharCode = string.codePointAt(0);
 		if ( firstCharCode === 0x30 )
 			return string.length === 1;
 		let isCharNumeric = isNumericChar(firstCharCode);
 		if (string.length > 1 && isCharNumeric) {
 			let i = 1;
 			do {
-				isCharNumeric = isNumericChar(string.charCodeAt(i));
+				isCharNumeric = isNumericChar(string.codePointAt(i));
 			} while (isCharNumeric && i < string.length);
 		}
 		return isCharNumeric;
@@ -1308,35 +1206,38 @@
 	 *
 	 * @param {string} string
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeStringMaybeInteger(string, byteView, state, options) {
 
 		const isPosInt = isPositiveIntegerString(string);
-
-		if (isPosInt)
+		if (isPosInt) {
 			encodeInteger(true, parseInt(string, 10), byteView, state, options);
-		else
+		}
+		else {
 			encodeString(string, byteView, state, options);
+		}
 	}
 
 	/**
 	 *
-	 * @param {object} value
+	 * @param {Object} object
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
-	function encodeObject(value, byteView, state, options) {
-		const keys = Object.keys(value);
+	function encodeObject(object, byteView, state, options) {
+		const keys = Object.keys(object);
 		const memberCount = keys.length;
 		encodePrefix(160, memberCount, byteView, state, options);
+		let key = undefined;
+		let value = undefined;
 		for (let i = 0; i < memberCount; ++i) {
-			const key = keys[i];
-			const member = value[key];
+			key = keys[i];
+			value = object[key];
 			encodeStringMaybeInteger(key, byteView, state, options);
-			encodeElement(member, byteView, state, options);
+			encodeElement(value, byteView, state, options);
 		}
 	}
 
@@ -1344,8 +1245,8 @@
 	 *
 	 * @param {*} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function encodeElement(value, byteView, state, options) {
 		switch (value) {
@@ -1441,7 +1342,7 @@
 						if (value instanceof Date) {
 							if (options.encodeDatesAsStrings !== true) {
 								encodeTag(1, byteView, state, options);
-								encodeNumber(value.valueOf() / 1000, byteView, state, options);
+								encodeDouble(value.valueOf() / 1000, byteView, state, options);
 							} else {
 								encodeTag(0, byteView, state, options);
 								encodeStringRaw(value.toISOString(), byteView, state, options);
@@ -1500,11 +1401,11 @@
 							break;
 						}
 						if (value instanceof WeakMap) {
-							encodeObject(emptyObject, byteView, state, options);
+							encodeWeakMap(byteView, state, options);
 							break;
 						}
 						if (value instanceof WeakSet) {
-							encodeArray(emptyArray, byteView, state, options);
+							encodeWeakSet( byteView, state, options);
 							break;
 						}
 						encodeObject(value, byteView, state, options);
@@ -1520,16 +1421,19 @@
 	/**
 	 *
 	 * @param {*} value
-	 * @param {object} [options]
+	 * @param {Object} [options]
 	 * @returns {number|ArrayBuffer}
 	 */
 	function encode(value, options) {
 		if (arguments.length < 2 || options === null || typeof options !== 'object')
-			options = emptyObject;
-		const state = {offset: 0};
+			options = Object.create(null);
+		const state = {offset: 0, length: 0, end: 0, next: undefined};
 
 		let buffer = null;
 		let byteView = null;
+
+		if ( isNaN(options.minExplicitConvSize) )
+			options.minExplicitConvSize = 2;
 
 		if (options.dryRun !== true) {
 			const optionsDryRun = Object.setPrototypeOf({dryRun: true}, options);
@@ -1599,91 +1503,414 @@
 		return (expoBits === 0
 				? sign * fraction * POW_2_24
 				: expoBits !== 0x7C00
-			        ? sign * Math.pow(2, ( (expoBits >>> 10) - 25 )) * (fraction + 0x0400)
+			        ? sign * (1 << ( (expoBits >>> 10) - 25 )) * (fraction + 0x0400)
 			        : fraction !== 0
 					  ? NaN
 					  : sign * Infinity
 		);
-	}
+    }
 
 	/**
 	 *
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
+	 * @param {Object} state
 	 * @param {number} elementCount
-	 * @param {object} options
+	 * @param {Object} options
 	 * @returns {Array|Set}
 	 */
-	function parseFixedLengthArray(byteView, state, elementCount, options) {
-		const setMember = state.next === undefined ? objectSetMember : setAddMember2;
-		const value = state.next === undefined ? new Array(elementCount) : new state.next();
-		delete state.next;
+    function parseFixedLengthArray(byteView, state, elementCount, options) {
+        const array = [];
 
-		for (let i = 0; i < elementCount; ++i)
-			setMember(value, i, decodeElement(byteView, state, options));
+        for (let i = 0; i < elementCount; ++i)
+            array.push(decodeElement(byteView, state, options));
 
-		return value;
-	}
+        return array;
+    }
 
 	/**
 	 *
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
+	 * @param {Object} state
 	 * @param {number} elementCount
-	 * @param {object} options
+	 * @param {Object} options
+	 * @returns {Array|Set}
+	 */
+    function parseFixedLengthSet(byteView, state, elementCount, options) {
+        const set = new Set();
+        state.next = undefined;
+
+        for (let i = 0; i < elementCount; ++i)
+            set.add(decodeElement(byteView, state, options));
+
+        return set;
+    }
+
+	/**
+	 *
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {number} elementCount
+	 * @param {Object} options
 	 * @returns {object|Map}
 	 */
-	function parseFixedLengthMap(byteView, state, elementCount, options) {
-		const setMember = state.next === undefined ? objectSetMember : mapSetMember;
-		const value = state.next === undefined ? Object.create(null) : new state.next();
-		delete state.next;
+    function parseFixedLengthObject(byteView, state, elementCount, options) {
+        const object = Object.create(null);
+		let nextKey = undefined;
+		let nextValue = undefined;
 
-		for (let i = 0; i < elementCount; ++i) {
-			const nextKey = decodeElement(byteView, state, options);
-			if (nextKey === breakIndicator) {
-				if (options.doNotThrow !== true)
-					throw new Error("Break indicator encountered when decoding key fixed-length map element.");
-				--i;
-				continue;
-			}
-			if (nextKey instanceof NonCodingIndicator) continue;
-			for (; ;) {
-				const nextValue = decodeElement(byteView, state, options);
-				if (nextValue === breakIndicator) {
-					if (options.doNotThrow !== true)
-						throw new Error("Break indicator encountered when decoding value of map element.");
-				}
-				if (nextValue instanceof NonCodingIndicator) continue;
-				setMember(value, nextKey, nextValue); // value[nextKey] = nextValue;
-				break;
-			}
-		}
-		return value;
-	}
+        for (let i = 0; i < elementCount; ++i) {
+            nextKey = decodeElement(byteView, state, options);
+            if (nextKey === breakIndicator) {
+                if (options.doNotThrow !== true)
+                    throw new Error("Break indicator encountered when decoding key fixed-length map element.");
+                --i;
+                continue;
+            }
+            if (nextKey instanceof NonCodingIndicator) continue;
+
+
+            nextValue = decodeElement(byteView, state, options);
+            while (nextValue !== breakIndicator) {
+                if (!(nextValue instanceof NonCodingIndicator)) {
+                    object[nextKey] = nextValue;
+                    break;
+                }
+                nextValue = decodeElement(byteView, state, options);
+            }
+            if (nextValue === breakIndicator) {
+                if (options.doNotThrow !== true)
+                    throw new Error("Break indicator encountered when decoding value of map element.");
+            }
+
+        }
+        return object;
+    }
+
+	/**
+	 *
+	 * @param {Uint8Array} byteView
+	 * @param {Object} state
+	 * @param {number} elementCount
+	 * @param {Object} options
+	 * @returns {object|Map}
+	 */
+    function parseFixedLengthMap(byteView, state, elementCount, options) {
+        const map = new Map;
+
+        let nextKey = undefined;
+        let nextValue = undefined;
+
+        for (let i = 0; i < elementCount; ++i) {
+            nextKey = decodeElement(byteView, state, options);
+            if (nextKey === breakIndicator) {
+                if (options.doNotThrow !== true)
+                    throw new Error("Break indicator encountered when decoding key fixed-length map element.");
+                --i;
+                continue;
+            }
+            if (nextKey instanceof NonCodingIndicator) continue;
+
+
+            nextValue = decodeElement(byteView, state, options);
+            while (nextValue !== breakIndicator) {
+                if (!(nextValue instanceof NonCodingIndicator)) {
+                    map.set(nextKey, nextValue);
+                    break;
+                }
+                nextValue = decodeElement(byteView, state, options);
+            }
+            if (nextValue === breakIndicator) {
+                if (options.doNotThrow !== true)
+                    throw new Error("Break indicator encountered when decoding value of map element.");
+            }
+
+        }
+        return map;
+    }
 
 	/**
 	 * https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 	 * @param {number} tag
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 * @returns {*}
 	 */
 	function parseTag(tag, byteView, state, options) {
+
+		function textDateTime() {
+			const dateString = decodeElement(byteView, state, options);
+			if (typeof dateString != 'string')
+				throw new Error("Date tagged as encoded as string, but is " + (typeof dateString));
+			return new Date(dateString);
+		}
+
+		function epochDateTime() {
+			const dateValue = decodeElement(byteView, state, options);
+			if (typeof dateValue != 'number')
+				throw new Error("Date tagged as encoded as number, but is " + (typeof dateValue));
+			return new Date(dateValue * 1000);
+		}
+
+		function arbitraryPrecisionNotImplemented() {
+			if (options.throwOnUnsupportedTag === true)
+				throw new Error("Arbitrary precision numbers not yet implemented");
+			return decodeElement(byteView, state, options);
+		}
+
+		function explicitBase64() {
+			const byteArray = decodeElement(byteView, state, options);
+			if (!(byteArray instanceof Uint8Array )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Explicit Base64 string conversion tag encoded value is not given as byte array.");
+				return byteArray;
+			}
+			return decodeBytesAsBase64String(byteArray, {
+				offset: 0,
+				base64Url: false
+			}, byteArray.byteLength, options);
+		}
+
+		function explicitBase64Url() {
+
+			const byteArray = decodeElement(byteView, state, options);
+			if (!(byteArray instanceof Uint8Array )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Explicit Base64Url string conversion tag encoded value is not given as byte array.");
+				return byteArray;
+			}
+			return decodeBytesAsBase64String(byteArray.byteLength,
+				byteArray, {
+					offset: 0,
+					base64Url: true
+				}, options);
+
+		}
+
+		function explicitBase16() {
+			const byteArray = decodeElement(byteView, state, options);
+			if (!(byteArray instanceof Uint8Array )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Explicit Base16 (Upper Case) string conversion tag encoded value is not given as byte array.");
+				return byteArray;
+			}
+			return decodeBytesAsHexString(byteArray.byteLength,
+				byteArray, {
+					offset: 0,
+					hexLowerCase: false
+				}, options);
+		}
+
+		function embeddedCbor() {
+			const byteArray = decodeElement(byteView, state, options);
+			if (!(byteArray instanceof Uint8Array )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Embedded CBOR element conversion tag encoded value is not given as byte array.");
+				return byteArray;
+			}
+			return decode(byteArray, options);
+		}
+
+		function regExp() {
+			const regexString = decodeElement(byteView, state, options);
+			if (typeof regexString != 'string') {
+				if (options.doNotThrow !== true)
+					throw new Error("Tagged regular expression element should be string, is " + (typeof regexString));
+				return regexString;
+			}
+			const regexParts = regExpForRegExps.exec(regexString);
+			if (regexParts === null) {
+				if (options.doNotThrow !== true)
+					throw new Error("Tagged regular expression is not valid.");
+				return regexString;
+			}
+			return new RegExp(regexParts[1], regexParts[2]);
+		}
+
+		function selfDescription() {
+			// full 3 bytes: tag 0xD9, data 0xD9, 0xF7
+			if (state.offset !== 1) {
+				if (options.doNotThrow !== true)
+					throw new Error("Encountered CBOR self-description tag sequence, but not at the start of the stream.");
+			}
+			return selfDescribingIndicator;
+		}
+
+		function base16LC() {
+			const byteArray = decodeElement(byteView, state, options);
+			if (!(byteArray instanceof Uint8Array )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Explicit Base 16 (Lower Case) string conversion tag encoded value is not given as byte array.");
+				return byteArray;
+			}
+			return decodeBytesAsHexString(byteArray, {
+				offset: 0,
+				hexLowerCase: true
+			}, byteArray.byteLength, options);
+		}
+
+		function map() {
+
+			state.next = Map;
+			const map = decodeElement(byteView, state, options);
+			if (!(map instanceof Map )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Map tag encoded value is not given as a map.");
+				state.next = undefined;
+			}
+			return map;
+		}
+
+		function set() {
+
+			state.next = Set;
+			const set = decodeElement(byteView, state, options);
+			if (!(set instanceof Set )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Set tag encoded value is not given as an array.");
+				state.next = undefined;
+			}
+			return set;
+		}
+
+		function arrayViewType(type) {
+			const byteArray = decodeElement(byteView, state, options);
+			if (!(byteArray instanceof Uint8Array )) {
+				if (options.doNotThrow !== true)
+					throw new Error(`${type.name} tag encoded value is not given as byte array.`);
+				return byteArray;
+			}
+			return new type(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+		}
+
+		function arrayBuffer() {
+			const byteArray = decodeElement(byteView, state, options);
+			if (!(byteArray instanceof Uint8Array )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Uint8Array tag encoded value is not given as byte array.");
+				return byteArray;
+			}
+			const newByteArray = new Uint8Array(byteArray.byteLength);
+			newByteArray.set(byteArray, 0);
+			return newByteArray.buffer;
+		}
+
+		function buffer() {
+			if (Buffer === undefined)
+				return nonCodingIndicator;
+
+			const byteArray = decodeElement(byteView, state, options);
+			if (!(byteArray instanceof Uint8Array )) {
+				if (options.doNotThrow !== true)
+					throw new Error("Buffer tag encoded value is not given as byte array.");
+				return byteArray;
+			}
+			return Buffer.from(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+		}
+
+		function boxed() {
+			const value = decodeElement(byteView, state, options);
+			switch (typeof value) {
+				case 'number' : //noinspection JSPrimitiveTypeWrapperUsage
+					return new Number(value);
+				case 'boolean' : //noinspection JSPrimitiveTypeWrapperUsage
+					return new Boolean(value);
+				case 'string' : //noinspection JSPrimitiveTypeWrapperUsage
+					return new String(value);
+				default: {
+					if (options.doNotThrow !== true)
+						throw new Error("Boxed type tag precedes unboxable typed element.");
+					return value;
+				}
+			}
+		}
+
+		function sharedSymbol() {
+
+			const value = decodeElement(byteView, state, options);
+			if (typeof value !== 'string') {
+				if (options.doNotThrow !== true)
+					throw new Error("Shared symbol string tag precedes non-string element.");
+				return value;
+			}
+			const regExpResult = regExpForSharedSymbols.exec(value);
+			if (regExpResult === null) {
+				if (options.doNotThrow !== true)
+					throw new Error("Shared symbol string is not in the expected format.");
+				return value;
+			}
+			return Symbol.for(regExpResult[1]);
+		}
+
+		function uniqueSymbol() {
+
+			const value = decodeElement(byteView, state, options);
+			if (typeof value !== 'string') {
+				if (options.doNotThrow !== true)
+					throw new Error("Unique symbol string tag precedes non-string element.");
+				return value;
+			}
+			const regExpResult = regExpForUniqueSymbols.exec(value);
+			if (regExpResult === null) {
+				if (options.doNotThrow !== true)
+					throw new Error("Unique symbol string is not in the expected format.");
+				return value;
+			}
+			return Symbol(regExpResult[1]);
+		}
+
+		function weakMap() {
+
+			const object = decodeElement(byteView, state, options);
+			if (!(object instanceof Object )) {
+				if (options.doNotThrow !== true)
+					throw new Error("WeakMap tag encoded value is not given as an object.");
+			}
+			if (Object_isEmpty(object) !== true) {
+				if (options.doNotThrow !== true)
+					throw new Error("WeakMap tag encoded object must be empty.");
+				return object;
+			}
+			return new WeakMap();
+		}
+
+		function weakSet() {
+
+			const array = decodeElement(byteView, state, options);
+			if (!(Array.isArray(array))) {
+				if (options.doNotThrow !== true)
+					throw new Error("WeakSet tag encoded value is not given as an array.");
+			}
+			if (array.length !== 0) {
+				if (options.doNotThrow !== true)
+					throw new Error("WeakSet tag encoded array must be empty.");
+				return array;
+			}
+			return new WeakSet();
+		}
+
+		function unknown() {
+
+			if ('unknownTagParser' in options) {
+				const result = options.unknownTagParser(tag, byteView, state, options);
+				if (options.doNotThrow !== true && options.throwOnUnsupportedTag === true && result instanceof ErrorIndicator)
+					throw new Error('Encountered unknown and unhandled tag ' + tag);
+				return result;
+
+			}
+			if (options.doNotThrow !== true && options.throwOnUnsupportedTag === true)
+				throw new Error("Tag not yet implemented or unsupported.");
+			return errorIndicator;
+		}
+
 		switch (tag) {
 			// tag 0, Text based date and time
 			case 0: {
-				const dateString = decodeElement(byteView, state, options);
-				if (typeof dateString != 'string')
-					throw new Error("Date tagged as encoded as string, but is " + (typeof dateString));
-				return new Date(dateString);
+				return textDateTime();
 			}
 			// tag 1, Epoch based date and time
 			case 1: {
-				const dateValue = decodeElement(byteView, state, options);
-				if (typeof dateValue != 'number')
-					throw new Error("Date tagged as encoded as number, but is " + (typeof dateValue));
-				return new Date(dateValue * 1000);
+				return epochDateTime();
 			}
 			// tag 2, Positive big number
 			// tag 3, Negative big number
@@ -1692,9 +1919,7 @@
 			case 2:
 			case 3:
 			case 4: {
-				if (options.throwOnUnsupportedTag === true)
-					throw new Error("Arbitrary precision numbers not yet implemented");
-				break;
+				return arbitraryPrecisionNotImplemented();
 			}
 
 			// tags 6 to 20, unassigned
@@ -1719,54 +1944,18 @@
 
 			// tags 21 to 23, explicit conversions: base64url, base64, base16 (upper-case)
 			case 21: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Explicit Base64 string conversion tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return decodeBytesAsBase64String(byteArray, {
-					offset: 0,
-					base64Url: false
-				}, byteArray.byteLength, options);
+				return explicitBase64()
 			}
 			case 22: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Explicit Base64Url string conversion tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return decodeBytesAsBase64String(byteArray.byteLength,
-					byteArray, {
-						offset: 0,
-						base64Url: true
-					}, options);
-
+				return explicitBase64Url();
 			}
 			case 23: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Explicit Base16 (Upper Case) string conversion tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return decodeBytesAsHexString(byteArray.byteLength,
-					byteArray, {
-						offset: 0,
-						hexLowerCase: false
-					}, options);
+				return explicitBase16();
 			}
 
 			// tag 24: embedded CBOR element
 			case 24: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Embedded CBOR element conversion tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return decode(byteArray, options);
+				return embeddedCbor();
 			}
 			// tags 25 to 31, unassigned
 			// tag 32, URI text
@@ -1783,259 +1972,110 @@
 			}
 			// tag 35, regex
 			case 35 : {
-				const regexString = decodeElement(byteView, state, options);
-				if (typeof regexString != 'string') {
-					if (options.doNotThrow !== true)
-						throw new Error("Tagged regular expression element should be string, is " + (typeof regexString));
-					return regexString;
-				}
-				const regexParts = regExpForRegExps.exec(regexString);
-				if (regexParts === null) {
-					if (options.doNotThrow !== true)
-						throw new Error("Tagged regular expression is not valid.");
-					return regexString;
-				}
-				return new RegExp(regexParts[1], regexParts[2]);
+				return regExp();
 			}
 			// tag 36, MIME message
-			// tags 37 to 55798, unassigned
-			// tag 55799, self-describing CBOR
-			case 55799: {
-				// full 3 bytes: tag 0xD9, data 0xD9, 0xF7
-				if (state.offset !== 1) {
-					if (options.doNotThrow !== true)
-						throw new Error("Encountered CBOR self-description tag sequence, but not at the start of the stream.");
-				}
-				return selfDescribingIndicator;
+			case 36 : {
+				return nonCodingIndicator;
 			}
+			// tags 37 to 55798, unassigned
 			// tags 55800 and up, unassigned
 
 			// unofficial:
 			// 126: explicit conversion of binary string to base16 (lower case) string
 			case 126: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Explicit Base 16 (Lower Case) string conversion tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return decodeBytesAsHexString(byteArray, {
-					offset: 0,
-					hexLowerCase: true
-				}, byteArray.byteLength, options);
-
+				return base16LC();
 			}
 			// 127: following map is a 'Map'
 			case 127: {
-				state.next = Map;
-				const map = decodeElement(byteView, state, options);
-				if (!(map instanceof Map )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Map tag encoded value is not given as a map.");
-					delete state.next;
-				}
-				return map;
+				return map();
 			}
 			// 128: following array is a 'Set'
 			case 128: {
-				state.next = Set;
-				const set = decodeElement(byteView, state, options);
-				if (!(set instanceof Set )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Set tag encoded value is not given as an array.");
-					delete state.next;
-				}
-				return set;
+				return set();
 			}
 			// 129: following binary string is an 'Int8Array'
 			case 129: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Int8Array tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return new Int8Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(Int8Array);
 			}
 			// 130: following binary string is an 'ArrayBuffer'
 			case 130: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Uint8Array tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				const newByteArray = new Uint8Array(byteArray.byteLength);
-				newByteArray.set(byteArray, 0);
-				return newByteArray.buffer;
+				return arrayBuffer();
 			}
 			// 131: following binary string is an 'Uint8ClampedArray'
 			case 131: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Uint8ClampedArray tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				//noinspection JSCheckFunctionSignatures // bad inspection
-				return new Uint8ClampedArray(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(Uint8ClampedArray);
 			}
 			// 132: following binary string or array is an 'Int16Array'
 			case 132: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Int16Array tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return new Int16Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(Int16Array);
 			}
 			// 133: following binary string or array is an 'Uint16Array'
 			case 133: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Uint16Array tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return new Uint16Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(Uint16Array);
 			}
 			// 134: following binary string or array is an 'Int32Array'
 			case 134: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Int32Array tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return new Int32Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(Int32Array);
 			}
 			// 135: following binary string or array is an 'Uint32Array'
 			case 135: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Uint32Array tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return new Uint32Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(Uint32Array);
 			}
 			// 136: following binary string or array is a 'Float32Array'
 			case 136: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Float32Array tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return new Float32Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(Float32Array);
 			}
 			// 137: following binary string or array is a 'Float64Array'
 			case 137: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Float64Array tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return new Float64Array(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(Float64Array);
 			}
 			// 138: following binary string or array is a 'DataView'
 			case 138: {
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("DataView tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return new DataView(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
+				return arrayViewType(DataView);
 			}
 			// 139: following string, binary string or array is a 'Buffer'
 			case 139: {
-				if (typeof Buffer === 'undefined')
-					return nonCodingIndicator;
+				return buffer();
 
-				const byteArray = decodeElement(byteView, state, options);
-				if (!(byteArray instanceof Uint8Array )) {
-					if (options.doNotThrow !== true)
-						throw new Error("Buffer tag encoded value is not given as byte array.");
-					return byteArray;
-				}
-				return Buffer.from(byteArray.buffer, byteArray.byteOffset, byteArray.byteLength);
-				
-			}
-			// 270: following element is a boxed version of a simple type (e.g. Number, Boolean, String)
-			case 270: {
-				const value = decodeElement(byteView, state, options);
-				switch (typeof value) {
-					case 'number' : //noinspection JSPrimitiveTypeWrapperUsage
-						return new Number(value);
-					case 'boolean' : //noinspection JSPrimitiveTypeWrapperUsage
-						return new Boolean(value);
-					case 'string' : //noinspection JSPrimitiveTypeWrapperUsage
-						return new String(value);
-					default: {
-						if (options.doNotThrow !== true)
-							throw new Error("Boxed type tag precedes unboxable typed element.");
-						return value;
-					}
-				}
 			}
 			// 141: following string is a shared named symbol
 			case 141: {
-				const value = decodeElement(byteView, state, options);
-				if (typeof value !== 'string') {
-					if (options.doNotThrow !== true)
-						throw new Error("Shared symbol string tag precedes non-string element.");
-					return value;
-				}
-				const regExpResult = regExpForSharedSymbols.exec(value);
-				if (regExpResult === null) {
-					if (options.doNotThrow !== true)
-						throw new Error("Shared symbol string is not in the expected format.");
-					return value;
-				}
-				return Symbol.for(regExpResult[1]);
+				return sharedSymbol();
 			}
 			// 142: following string is a unique unshared symbol
 			case 142: {
-				const value = decodeElement(byteView, state, options);
-				if (typeof value !== 'string') {
-					if (options.doNotThrow !== true)
-						throw new Error("Unique symbol string tag precedes non-string element.");
-					return value;
-				}
-				const regExpResult = regExpForUniqueSymbols.exec(value);
-				if (regExpResult === null) {
-					if (options.doNotThrow !== true)
-						throw new Error("Unique symbol string is not in the expected format.");
-					return value;
-				}
-				return Symbol(regExpResult[1]);
+				return uniqueSymbol();
+			}
+			// empty WeakMap object
+			case 143: {
+				return weakMap();
+			}
+			// empty WeakSet object
+			case 144: {
+				return weakSet();
+			}
+			// 270: following element is a boxed version of a simple type (e.g. Number, Boolean, String)
+			case 270: {
+				return boxed();
+			}
+			// tag 55799, self-describing CBOR
+			case 55799: {
+				return selfDescription();
 			}
 
 			default: {
-				if ('unknownTagParser' in options) {
-					const result = options.unknownTagParser(tag, byteView, state, options);
-					if (options.doNotThrow !== true && options.throwOnUnsupportedTag === true && result instanceof ErrorIndicator)
-						throw new Error('Encountered unknown and unhandled tag ' + tag);
-					return result;
-
-				}
-				if (options.doNotThrow !== true && options.throwOnUnsupportedTag === true)
-					throw new Error("Tag not yet implemented or unsupported.");
-				return errorIndicator;
+				return unknown();
 			}
 		}
-
 	}
 
 	/**
 	 * https://www.iana.org/assignments/cbor-simple-values/cbor-simple-values.xhtml
 	 * @param {number} value
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 */
 	function parseSimpleValue(value, byteView, state, options) {
 		switch (value) {
@@ -2088,17 +2128,26 @@
 	/**
 	 *
 	 * @param {Uint8Array} byteView
-	 * @param {object} state
-	 * @param {object} options
+	 * @param {Object} state
+	 * @param {Object} options
 	 * @returns {*}
 	 */
 	function decodeElement(byteView, state, options) {
 		let value;
-		/*
-		if (state.offset === state.end) {
-			return nonCodingIndicator;
-		}
-		*/
+
+		let i;
+		let byteLength;
+		let values;
+		let nextKey;
+		let nextValue;
+		let valueView;
+		let elementCount;
+		let next;
+		let offset;
+		let current;
+		let currentLength;
+
+
 		if (state.offset >= state.end) {
 			if (options.doNotThrow !== true)
 				throw new Error("Encoded data does not terminate properly.");
@@ -2140,31 +2189,31 @@
 			case 23: {
 				if (options.dryRun !== true)
 					value = byte;
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				break;
 			}
 			case 24: {
 				if (options.dryRun !== true)
 					value = byteView[state.offset + 1];
-				state.offset += 2;
+				state.offset = state.offset + (2);
 				break;
 			}
 			case 25: {
 				if (options.dryRun !== true)
 					value = readUint16(byteView, state.offset + 1);
-				state.offset += 3;
+				state.offset = state.offset + (3);
 				break;
 			}
 			case 26: {
 				if (options.dryRun !== true)
 					value = readUint32(byteView, state.offset + 1);
-				state.offset += 5;
+				state.offset = state.offset + (5);
 				break;
 			}
 			case 27: {
 				if (options.dryRun !== true)
 					value = readUint64(byteView, state.offset + 1);
-				state.offset += 9;
+				state.offset = state.offset + (9);
 				break;
 			}
 
@@ -2195,31 +2244,31 @@
 			case 55: {
 				if (options.dryRun !== true)
 					value = (32 - 1) - byte;
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				break;
 			}
 			case 56: {
 				if (options.dryRun !== true)
 					value = ~byteView[state.offset + 1];
-				state.offset += 2;
+				state.offset = state.offset + (2);
 				break;
 			}
 			case 57: {
 				if (options.dryRun !== true)
 					value = ~readUint16(byteView, state.offset + 1);
-				state.offset += 3;
+				state.offset = state.offset + (3);
 				break;
 			}
 			case 58: {
 				if (options.dryRun !== true)
 					value = -1 - readUint32(byteView, state.offset + 1);
-				state.offset += 5;
+				state.offset = state.offset + (5);
 				break;
 			}
 			case 59: {
 				if (options.dryRun !== true)
 					value = -1 - readUint64(byteView, state.offset + 1);
-				state.offset += 9;
+				state.offset = state.offset + (9);
 				break;
 			}
 
@@ -2248,49 +2297,52 @@
 			case 85:
 			case 86:
 			case 87: {
-				const byteLength = -64 + byte;
+				byteLength = -64 + byte;
 				value = new Uint8Array(byteView.buffer, state.offset + 1, byteLength);
-				state.offset += 1 + byteLength;
+				state.offset = state.offset + (1 + byteLength);
 				break;
 			}
 			case 88: {
-				const byteLength = byteView[state.offset + 1];
+				byteLength = byteView[state.offset + 1];
 				value = new Uint8Array(byteView.buffer, state.offset + 2, byteLength);
-				state.offset += 2 + byteLength;
+				state.offset = state.offset + (2 + byteLength);
 				break;
 			}
 			case 89: {
-				const byteLength = readUint16(byteView, state.offset + 1);
+				byteLength = readUint16(byteView, state.offset + 1);
 				value = new Uint8Array(byteView.buffer, state.offset + 3, byteLength);
-				state.offset += 3 + byteLength;
+				state.offset = state.offset + (3 + byteLength);
 				break;
 			}
 			case 90: {
-				const byteLength = readUint32(byteView, state.offset + 1);
+				byteLength = readUint32(byteView, state.offset + 1);
 				value = new Uint8Array(byteView.buffer, state.offset + 5, byteLength);
-				state.offset += 5 + byteLength;
+				state.offset = state.offset + (5 + byteLength);
 				break;
 			}
 			case 91: {
-				const byteLength = readUint64(byteView, state.offset + 1);
+				byteLength = readUint64(byteView, state.offset + 1);
 				value = new Uint8Array(byteView.buffer, state.offset + 9, byteLength);
-				state.offset += 9 + byteLength;
+				state.offset = state.offset + (9 + byteLength);
 				break;
 			}
 
 			// cases 92 - 94 undefined
 
 			case 95: {
-				state.offset += 1;
-				const values = [];
-				for (; ;) {
-					const nextValue = decodeElement(byteView, state, options);
-					if (nextValue === breakIndicator) break;
-					if (nextValue instanceof NonCodingIndicator) continue;
-					if (!(nextValue instanceof Uint8Array))
-						throw new Error((typeof nextValue) + " encountered when decoding value of indefinite byte array element.");
-					values.push(nextValue);
+				state.offset = state.offset + (1);
+				values = [];
+
+				nextValue = decodeElement(byteView, state, options);
+				while ( nextValue !== breakIndicator) {
+					if (!(nextValue instanceof NonCodingIndicator)) {
+						if (!(nextValue instanceof Uint8Array))
+							throw new Error((typeof nextValue) + " encountered when decoding value of indefinite byte array element.");
+						values.push(nextValue);
+					}
+					nextValue = decodeElement(byteView, state, options);
 				}
+
 				if (values.length === 0) {
 					value = emptyByteArray;
 					break;
@@ -2301,17 +2353,19 @@
 					break;
 				}
 				else {
-					let byteLength = 0;
+					byteLength = 0;
 					for (let i = 0; i < values.length; ++i)
-						byteLength += values[i].byteLength;
-					const valueView = new Uint8Array(byteLength);
+						byteLength = byteLength + (values[i].byteLength);
+					valueView = new Uint8Array(byteLength);
 					value = valueView.buffer;
-					let offset = 0;
-					for (let i = 0; i < values.length; ++i) {
-						const current = values[i];
-						const currentLength = current.byteLength;
+					offset = 0;
+					current = undefined;
+					currentLength = undefined;
+					for (i = 0; i < values.length; ++i) {
+						current = values[i];
+						currentLength = current.byteLength;
 						valueView.set(current, offset);
-						offset += currentLength;
+						offset = offset + (currentLength);
 					}
 					break;
 				}
@@ -2343,47 +2397,50 @@
 			case 117:
 			case 118:
 			case 119: {
-				let byteLength = -96 + byte;
-				state.offset += 1;
+				byteLength = -96 + byte;
+				state.offset = state.offset + (1);
 				value = decodeBytesAsUtf8String(byteView, state, byteLength, options);
 				break;
 			}
 			case 120: {
-				let byteLength = byteView[state.offset + 1];
-				state.offset += 2;
+				byteLength = byteView[state.offset + 1];
+				state.offset = state.offset + (2);
 				value = decodeBytesAsUtf8String(byteView, state, byteLength, options);
 				break;
 			}
 			case 121: {
-				let byteLength = readUint16(byteView, state.offset + 1);
-				state.offset += 3;
+				byteLength = readUint16(byteView, state.offset + 1);
+				state.offset = state.offset + (3);
 				value = decodeBytesAsUtf8String(byteView, state, byteLength, options);
 				break;
 			}
 			case 122: {
-				let byteLength = readUint32(byteView, state.offset + 1);
-				state.offset += 5;
+				byteLength = readUint32(byteView, state.offset + 1);
+				state.offset = state.offset + (5);
 				value = decodeBytesAsUtf8String(byteView, state, byteLength, options);
 				break;
 			}
 			case 123: {
-				let byteLength = readUint64(byteView, state.offset + 1);
-				state.offset += 9;
+				byteLength = readUint64(byteView, state.offset + 1);
+				state.offset = state.offset + (9);
 				value = decodeBytesAsUtf8String(byteView, state, byteLength, options);
 				break;
 			}
 
 			case 127: {
-				state.offset += 1;
-				const values = [];
-				for (; ;) {
-					const nextValue = decodeElement(byteView, state, options);
-					if (nextValue === breakIndicator) break;
-					if (nextValue instanceof NonCodingIndicator) continue;
-					if (typeof nextValue !== 'string' && options.indefiniteStringNonStrings !== true)
-						throw new Error("Non-string encountered when decoding value of indefinite string element.");
-					values.push(nextValue);
+				state.offset = state.offset + (1);
+				values = [];
+
+				nextValue = decodeElement(byteView, state, options);
+				while (nextValue !== breakIndicator) {
+					if (!(nextValue instanceof NonCodingIndicator)){
+						if (typeof nextValue !== 'string' && options.indefiniteStringNonStrings !== true)
+							throw new Error("Non-string encountered when decoding value of indefinite string element.");
+						values.push(nextValue);
+					}
+					nextValue = decodeElement(byteView, state, options);
 				}
+
 				value = values.join('');
 				break;
 			}
@@ -2412,48 +2469,88 @@
 			case 149:
 			case 150:
 			case 151: {
-				const elementCount = -128 + byte;
-				state.offset += 1;
-				value = parseFixedLengthArray(byteView, state, elementCount, options);
+				elementCount = -128 + byte;
+                state.offset = state.offset + (1);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Set)
+                    value = parseFixedLengthArray(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthSet(byteView, state, elementCount, options);
 				break;
 			}
 			case 152: {
-				const elementCount = byteView[state.offset + 1];
-				state.offset += 2;
-				value = parseFixedLengthArray(byteView, state, elementCount, options);
+				elementCount = byteView[state.offset + 1];
+                state.offset = state.offset + (2);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Set)
+                    value = parseFixedLengthArray(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthSet(byteView, state, elementCount, options);
 				break;
 			}
 			case 153: {
-				const elementCount = readUint16(byteView, state.offset + 1);
-				state.offset += 3;
-				value = parseFixedLengthArray(byteView, state, elementCount, options);
+				elementCount = readUint16(byteView, state.offset + 1);
+                state.offset = state.offset + (3);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Set)
+                    value = parseFixedLengthArray(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthSet(byteView, state, elementCount, options);
 				break;
 			}
 			case 154: {
-				const elementCount = readUint32(byteView, state.offset + 1);
-				state.offset += 5;
-				value = parseFixedLengthArray(byteView, state, elementCount, options);
+				elementCount = readUint32(byteView, state.offset + 1);
+                state.offset = state.offset + (5);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Set)
+                    value = parseFixedLengthArray(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthSet(byteView, state, elementCount, options);
 				break;
 			}
 			case 155: {
-				const elementCount = readUint64(byteView, state.offset + 1);
-				state.offset += 9;
-				value = parseFixedLengthArray(byteView, state, elementCount, options);
+				elementCount = readUint64(byteView, state.offset + 1);
+                state.offset = state.offset + (9);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Set)
+                    value = parseFixedLengthArray(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthSet(byteView, state, elementCount, options);
 				break;
 			}
 
 			case 159: {
-				state.offset += 1;
-				const addMember = state.next === undefined ? arrayPushMember : setAddMember;
-				value = state.next === undefined ? [] : new state.next();
-				delete state.next;
-				for (; ;) {
-					const nextValue = decodeElement(byteView, state, options);
-					if (nextValue === breakIndicator) break;
-					if (nextValue instanceof NonCodingIndicator) continue;
-					addMember(value, nextValue);
-				}
-				break;
+				state.offset = state.offset + (1);
+                next = state.next;
+                state.next = undefined;
+			    if (next !== Set) {
+                    value = [];
+
+			        nextValue = decodeElement(byteView, state, options);
+			        while (nextValue !== breakIndicator) {
+			            if (!(nextValue instanceof NonCodingIndicator))
+			                value.push(nextValue);
+			            nextValue = decodeElement(byteView, state, options);
+			        }
+			    }
+			    else {
+			        value = new Set();
+
+			        nextValue = decodeElement(byteView, state, options);
+			        while (nextValue !== breakIndicator) {
+			            if (!(nextValue instanceof NonCodingIndicator))
+			                value.add(nextValue);
+			            nextValue = decodeElement(byteView, state, options);
+			        }
+
+			    }
+
+			    break;
 			}
 
 			case 160:
@@ -2480,54 +2577,113 @@
 			case 181:
 			case 182:
 			case 183: {
-				let elementCount = -160 + byte;
-				state.offset += 1;
-				value = parseFixedLengthMap(byteView, state, elementCount, options);
+                elementCount = -160 + byte;
+                state.offset = state.offset + (1);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Map)
+                    value = parseFixedLengthObject(byteView, state, elementCount, options);
+                else
+				    value = parseFixedLengthMap(byteView, state, elementCount, options);
 				break;
 			}
 			case 184: {
-				const elementCount = byteView[state.offset + 1];
-				state.offset += 2;
-				value = parseFixedLengthMap(byteView, state, elementCount, options);
+				elementCount = byteView[state.offset + 1];
+				state.offset = state.offset + (2);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Map)
+                    value = parseFixedLengthObject(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthMap(byteView, state, elementCount, options);
 				break;
 			}
 			case 185: {
-				const elementCount = readUint16(byteView, state.offset + 1);
-				state.offset += 3;
-				value = parseFixedLengthMap(byteView, state, elementCount, options);
+				elementCount = readUint16(byteView, state.offset + 1);
+				state.offset = state.offset + (3);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Map)
+                    value = parseFixedLengthObject(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthMap(byteView, state, elementCount, options);
 				break;
 			}
 			case 186: {
-				const elementCount = readUint32(byteView, state.offset + 1);
-				state.offset += 5;
-				value = parseFixedLengthMap(byteView, state, elementCount, options);
+				elementCount = readUint32(byteView, state.offset + 1);
+				state.offset = state.offset + (5);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Map)
+                    value = parseFixedLengthObject(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthMap(byteView, state, elementCount, options);
 				break;
 			}
 			case 187: {
-				const elementCount = readUint64(byteView, state.offset + 1);
-				state.offset += 9;
-				value = parseFixedLengthMap(byteView, state, elementCount, options);
+				elementCount = readUint64(byteView, state.offset + 1);
+				state.offset = state.offset + (9);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Map)
+                    value = parseFixedLengthObject(byteView, state, elementCount, options);
+                else
+                    value = parseFixedLengthMap(byteView, state, elementCount, options);
 				break;
 			}
 
 			case 191: {
-				state.offset += 1;
-				const setMember = state.next === undefined ? objectSetMember : mapSetMember;
-				value = state.next === undefined ? Object.create(null) : new state.next();
-				delete state.next;
-				for (; ;) {
-					const nextKey = decodeElement(byteView, state, options);
-					if (nextKey === breakIndicator) break;
-					if (nextKey instanceof NonCodingIndicator) continue;
-					for (; ;) {
-						const nextValue = decodeElement(byteView, state, options);
-						if (nextKey === breakIndicator)
-							throw new Error("Break indicator encountered when decoding value of indefinite map element.");
-						if (nextKey instanceof NonCodingIndicator) continue;
-						setMember(value, nextKey, nextValue);
-						break;
-					}
-				}
+                state.offset = state.offset + (1);
+                next = state.next;
+				state.next = undefined;
+                if (next !== Map) {
+                    value = Object.create(null);
+
+                    nextKey = decodeElement(byteView, state, options);
+                    while (nextKey !== breakIndicator) {
+                        if (nextKey instanceof NonCodingIndicator) continue;
+
+
+                        nextValue = decodeElement(byteView, state, options);
+                        while (nextValue !== breakIndicator) {
+                            if (!(nextValue instanceof NonCodingIndicator)) {
+                                value[nextKey] = nextValue;
+                                break;
+                            }
+                            nextValue = decodeElement(byteView, state, options);
+                        }
+                        if (nextValue === breakIndicator) {
+                            if (options.doNotThrow !== true)
+                                throw new Error("Break indicator encountered when decoding value of indefinite map element for object.");
+                        }
+
+                        nextKey = decodeElement(byteView, state, options);
+                    }
+                }
+                else {
+                    value = new Map();
+
+                    nextKey = decodeElement(byteView, state, options);
+                    while (nextKey !== breakIndicator) {
+                        if (nextKey instanceof NonCodingIndicator) continue;
+
+
+                        nextValue = decodeElement(byteView, state, options);
+                        while (nextValue !== breakIndicator) {
+                            if (!(nextValue instanceof NonCodingIndicator)) {
+                                value.set(nextKey, nextValue);
+                                break;
+                            }
+                            nextValue = decodeElement(byteView, state, options);
+                        }
+                        if (nextValue === breakIndicator) {
+                            if (options.doNotThrow !== true)
+                                throw new Error("Break indicator encountered when decoding value of indefinite map element for map.");
+                        }
+
+                        nextKey = decodeElement(byteView, state, options);
+                    }
+                }
 				break;
 			}
 
@@ -2578,7 +2734,7 @@
 			case 214:
 			case 215: // tags 21 to 23, base64url, base64, base16 (upperCase)
 			{
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				if (options.dryRun !== true)
 					value = parseTag(byte - 192, byteView, state, options);
 				break;
@@ -2614,25 +2770,25 @@
 				// 141: the following string is a named shared Symbol
 				// 142: the following string is a named unshared Symbol
 
-				state.offset += 2;
+				state.offset = state.offset + (2);
 				if (options.dryRun !== true)
 					value = parseTag(byteView[state.offset - 1], byteView, state, options);
 				break;
 			}
 			case 217: {
-				state.offset += 3;
+				state.offset = state.offset + (3);
 				if (options.dryRun !== true)
 					value = parseTag(readUint16(byteView, state.offset - 2), byteView, state, options);
 				break;
 			}
 			case 218: {
-				state.offset += 5;
+				state.offset = state.offset + (5);
 				if (options.dryRun !== true)
 					value = parseTag(readUint32(byteView, state.offset - 4), byteView, state, options);
 				break;
 			}
 			case 219: {
-				state.offset += 9;
+				state.offset = state.offset + (9);
 				if (options.dryRun !== true)
 					value = parseTag(readUint64(byteView, state.offset - 8), byteView, state, options);
 				break;
@@ -2661,31 +2817,31 @@
 					value = parseSimpleValue(byte - 224, byteView, state, options);
 					value = tagIndicator;
 				}
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				break;
 			}
 			case 244: {
 				value = false;
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				break;
 			}
 			case 245: {
 				value = true;
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				break;
 			}
 			case 246: {
 				value = null;
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				break;
 			}
 			case 247: {
 				value = undefined;
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				break;
 			}
 			case 248: {
-				state.offset += 2;
+				state.offset = state.offset + (2);
 				if (options.dryRun !== true)
 					value = parseSimpleValue(byteView[state.offset - 1], byteView, state, options);
 				break;
@@ -2693,7 +2849,7 @@
 			case 249: { // fp16
 				if (options.dryRun !== true)
 					decodeFloat16(readUint16(byteView, state.offset + 1));
-				state.offset += 3;
+				state.offset = state.offset + (3);
 				break;
 			}
 			case 250: { // fp32
@@ -2701,23 +2857,23 @@
 					smallBufferUint32[0] = readUint32(byteView, state.offset + 1);
 					value = smallBufferFloat32[0];
 				}
-				state.offset += 3;
+				state.offset = state.offset + (3);
 				break;
 			}
 			case 251: { // fp64
 				if (options.dryRun === true) {
-					state.offset += 9;
+					state.offset = state.offset + (9);
 					break;
 				}
-				state.offset += 1;
-				for (let i = 0; i < 8; ++i)
+				state.offset = state.offset + (1);
+				for (i = 0; i < 8; ++i)
 					smallBuffer8Bytes[i] = byteView[state.offset++];
 				value = smallBufferFloat64[0];
 				break;
 			}
 			case 255: {
 				state.break = true;
-				state.offset += 1;
+				state.offset = state.offset + (1);
 				value = breakIndicator;
 				break;
 			}
@@ -2733,7 +2889,7 @@
 	/**
 	 *
 	 * @param {ArrayBuffer|Int8Array|Uint8Array|Uint8ClampedArray|Int16Array|Uint16Array|Int32Array|Uint32Array|Float32Array|Float64Array|DataView|Buffer} buffer
-	 * @param {object} [options]
+	 * @param {Object} [options]
 	 * @returns {*}
 	 */
 	function decode(buffer, options) {
@@ -2755,10 +2911,10 @@
 		}
 		if (options === undefined || options === null || typeof options !== 'object')
 			options = Object.create(null);
-		let offset = options.offset || 0;
-		let length = options.length || buffer.byteLength;
-		let byteView = new Uint8Array(buffer);
-		let state = Object.setPrototypeOf({offset: offset, end: offset + length}, null);
+		const offset = options.offset || 0;
+        const length = options.length || buffer.byteLength;
+        const byteView = new Uint8Array(buffer);
+        const state = Object.setPrototypeOf({offset: offset, end: offset + length}, null);
 
 		let value;
 		do {
@@ -2772,7 +2928,7 @@
 			if (state.offset <= state.end) {
 				value = [value];
 				do {
-					value.push(decodeElement(byteView, state, options))
+                    value.push(decodeElement(byteView, state, options));
 				} while (state.offset <= state.end);
 			}
 		}
@@ -2800,49 +2956,64 @@
 	}
 
 	fixUndefinedSymbols();
-	initHexCodec();
-	initBase64Codec();
+	initBase64Lookups();
 	initUtf8Codec();
 
 	// API
-	cbor['encode'] = encode;
-	cbor['decode'] = decode;
+	CBOR['encode'] = encode;
+	CBOR['decode'] = decode;
 
-	cbor['decodeElement'] = decodeElement;
-	cbor['encodeElement'] = encodeElement;
+	CBOR['decodeElement'] = decodeElement;
+	CBOR['encodeElement'] = encodeElement;
 
-	cbor['NonCodingIndicator'] = NonCodingIndicator;
-	cbor['NonCodingIndicator'] = SelfDescribingIndicator;
-	cbor['ErrorIndicator'] = ErrorIndicator;
-	cbor['BreakIndicator'] = BreakIndicator;
-	cbor['TagIndicator'] = TagIndicator;
-	cbor['UnknownSimpleValue'] = UnknownSimpleValue;
+	CBOR['NonCodingIndicator'] = NonCodingIndicator;
+	CBOR['NonCodingIndicator'] = SelfDescribingIndicator;
+	CBOR['ErrorIndicator'] = ErrorIndicator;
+	CBOR['BreakIndicator'] = BreakIndicator;
+	CBOR['TagIndicator'] = TagIndicator;
+	CBOR['UnknownSimpleValue'] = UnknownSimpleValue;
 
-	cbor['optionDescriptions'] = optionDescriptions;
-
-	//noinspection JSUnusedAssignment
-	cbor['decodeBytesAsUtf8String'] = decodeBytesAsUtf8String;
-	//noinspection JSUnusedAssignment
-	cbor['decodeBytesAsHexString'] = decodeBytesAsHexString;
-	//noinspection JSUnusedAssignment
-	cbor['decodeBytesAsBase64String'] = decodeBytesAsBase64String;
+	CBOR['optionDescriptions'] = optionDescriptions;
 
 	//noinspection JSUnusedAssignment
-	cbor['encodeUtf8StringAsBytes'] = encodeUtf8StringAsBytes;
+	CBOR['decodeBytesAsUtf8String'] = decodeBytesAsUtf8String;
 	//noinspection JSUnusedAssignment
-	cbor['encodeHexStringAsBytes'] = encodeHexStringAsBytes;
+	CBOR['decodeBytesAsHexString'] = decodeBytesAsHexString;
 	//noinspection JSUnusedAssignment
-	cbor['encodeBase64StringAsBytes'] = encodeBase64StringAsBytes;
+	CBOR['decodeBytesAsBase64String'] = decodeBytesAsBase64String;
 
-	cbor['decodeFloat16'] = decodeFloat16;
+	//noinspection JSUnusedAssignment
+	CBOR['encodeUtf8StringAsBytes'] = encodeUtf8StringAsBytes;
+	//noinspection JSUnusedAssignment
+	CBOR['encodeHexStringAsBytes'] = encodeHexStringAsBytes;
+	//noinspection JSUnusedAssignment
+	CBOR['encodeBase64StringAsBytes'] = encodeBase64StringAsBytes;
 
-	Object.freeze(cbor);
+	CBOR['decodeFloat16'] = decodeFloat16;
 
-	if (typeof module !== 'undefined' && module.exports) {
-		// CommonJS
-		module.exports = cbor;
-	} else {
-		// Global
-		root.CBOR = cbor;
+	Object.freeze(CBOR);
+
+	// module exposure
+	{
+		const moduleObj = CBOR;
+		const moduleName = moduleObj.name;
+		//noinspection JSUnresolvedVariable
+		if (typeof define === 'function' && define.amd) {
+			//noinspection JSUnresolvedFunction
+			define(() => moduleObj);
+		} else { //noinspection JSUnresolvedVariable
+			if (typeof module !== 'undefined' && module != null) {
+				//noinspection JSUnresolvedVariable
+				module.exports = moduleObj
+			} else { //noinspection JSUnresolvedVariable
+				if (typeof angular !== 'undefined' && angular != null) {
+					//noinspection JSUnresolvedVariable,JSUnresolvedFunction
+					angular.module(moduleName, [])
+						.factory(moduleName, () => moduleObj);
+				} else {
+					root[moduleName] = moduleObj;
+				}
+			}
+		}
 	}
-})(this);
+})();

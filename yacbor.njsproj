@@ -1,0 +1,103 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{c46e583a-62b3-4fe2-90f2-5293e0f6b672}</ProjectGuid>
+    <ProjectHome />
+    <ProjectView>ShowAllFiles</ProjectView>
+    <StartupFile>cbor.js</StartupFile>
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <ProjectTypeGuids>{3AF33F2E-1136-4D97-BBB7-1795711AC8B8};{349c5851-65df-11da-9384-00065b846f21};{9092AA53-FB77-4645-B42D-1CCCA6BD08BD}</ProjectTypeGuids>
+    <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">11.0</VisualStudioVersion>
+    <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" />
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" />
+  <ItemGroup>
+    <Content Include="package.json" />
+    <Content Include="README.md" />
+    <Compile Include="cbor.js" />
+    <Compile Include="karma.conf.js" />
+    <Compile Include="test\bench-native-json.js" />
+    <Compile Include="test\bench.js" />
+    <Compile Include="test\test.js" />
+    <Compile Include="test\trace.js" />
+    <Content Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\index.html" />
+    <Content Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\base.css" />
+    <Content Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\prettify.css" />
+    <Content Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\sort-arrow-sprite.png" />
+    <Compile Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\prettify.js" />
+    <Compile Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\sorter.js" />
+    <Content Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\yacbor\cbor.js.html" />
+    <Content Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\yacbor\index.html" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="coverage" />
+    <Folder Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)" />
+    <Folder Include="coverage\Chrome 55.0.2883 (Windows 10 0.0.0)\yacbor" />
+    <Folder Include="test" />
+    <Folder Include="typings\" />
+    <Folder Include="typings\globals\" />
+    <Folder Include="typings\globals\benchmark\" />
+    <Folder Include="typings\globals\chai\" />
+    <Folder Include="typings\globals\istanbul\" />
+    <Folder Include="typings\globals\karma-coverage\" />
+    <Folder Include="typings\globals\karma\" />
+    <Folder Include="typings\globals\mocha\" />
+    <Folder Include="typings\globals\node\" />
+  </ItemGroup>
+  <ItemGroup>
+    <TypeScriptCompile Include="typings\globals\benchmark\index.d.ts" />
+    <TypeScriptCompile Include="typings\globals\chai\index.d.ts" />
+    <TypeScriptCompile Include="typings\globals\istanbul\index.d.ts" />
+    <TypeScriptCompile Include="typings\globals\karma-coverage\index.d.ts" />
+    <TypeScriptCompile Include="typings\globals\karma\index.d.ts" />
+    <TypeScriptCompile Include="typings\globals\mocha\index.d.ts" />
+    <TypeScriptCompile Include="typings\globals\node\index.d.ts" />
+    <TypeScriptCompile Include="typings\index.d.ts" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <!--Do not delete the following Import Project.  While this appears to do nothing it is a marker for setting TypeScript properties before our import that depends on them.-->
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\TypeScript\Microsoft.TypeScript.targets" Condition="False" />
+  <Import Project="$(VSToolsPath)\Node.js Tools\Microsoft.NodejsTools.targets" />
+  <ProjectExtensions>
+    <VisualStudio>
+      <FlavorProperties GUID="{349c5851-65df-11da-9384-00065b846f21}">
+        <WebProjectProperties>
+          <UseIIS>False</UseIIS>
+          <AutoAssignPort>True</AutoAssignPort>
+          <DevelopmentServerPort>0</DevelopmentServerPort>
+          <DevelopmentServerVPath>/</DevelopmentServerVPath>
+          <IISUrl>http://localhost:48022/</IISUrl>
+          <NTLMAuthentication>False</NTLMAuthentication>
+          <UseCustomServer>True</UseCustomServer>
+          <CustomServerUrl>http://localhost:1337</CustomServerUrl>
+          <SaveServerSettingsInUserFile>False</SaveServerSettingsInUserFile>
+        </WebProjectProperties>
+      </FlavorProperties>
+      <FlavorProperties GUID="{349c5851-65df-11da-9384-00065b846f21}" User="">
+        <WebProjectProperties>
+          <StartPageUrl>
+          </StartPageUrl>
+          <StartAction>CurrentPage</StartAction>
+          <AspNetDebugging>True</AspNetDebugging>
+          <SilverlightDebugging>False</SilverlightDebugging>
+          <NativeDebugging>False</NativeDebugging>
+          <SQLDebugging>False</SQLDebugging>
+          <ExternalProgram>
+          </ExternalProgram>
+          <StartExternalURL>
+          </StartExternalURL>
+          <StartCmdLineArguments>
+          </StartCmdLineArguments>
+          <StartWorkingDirectory>
+          </StartWorkingDirectory>
+          <EnableENC>False</EnableENC>
+          <AlwaysStartWebServerOnDebug>False</AlwaysStartWebServerOnDebug>
+        </WebProjectProperties>
+      </FlavorProperties>
+    </VisualStudio>
+  </ProjectExtensions>
+</Project>

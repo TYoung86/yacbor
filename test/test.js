@@ -697,10 +697,15 @@ describe('CBOR', () => {
 		});
 		context("strings", () => {
 
-			it('should encode "test" as a utf-8 string', () => {
+			it('should encode "test" as a utf-8 string and as explicit base-64 interpretation', () => {
+				assert.equalBytesAsHex(
+					new Uint8Array(CBOR.encode("test",{noExplicitConversion:true})),
+					new Uint8Array([0x64,0x74,0x65,0x73,0x74]),
+					"should be equal"
+				);
 				assert.equalBytesAsHex(
 					new Uint8Array(CBOR.encode("test")),
-					new Uint8Array([0x64,0x74,0x65,0x73,0x74]),
+					new Uint8Array([0xD5,0x42,0xB5,0xEB]),
 					"should be equal"
 				);
 			});
